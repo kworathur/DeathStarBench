@@ -44,12 +44,17 @@ git clone --recurse-submodules git@github.com:kworathur/DeathStarBench.git
 2. Compile LuaJIT library from sources
 
 ```sh
+sudo apt update
+sudo apt-get install libssl-dev
+sudo apt install zlib1g zlib1g-dev
+sudo apt-get install luarocks 
 cd DeathStarBench/wrk2 && make
 ```
 
 3. Build server binaries for each microservice
 
 ```sh
+sudo apt install golang-go
 cd DeathStarBench/hotelReservation
 go build -o bin/frontend ./cmd/frontend
 go build -o bin/search ./cmd/search
@@ -91,4 +96,13 @@ Install memcached
 sudo apt install memcached libmemcached-tools
 sudo systemctl start memcached
 sudo systemctl enable memcached
+```
+
+Install Jaeger (all-in-one)
+
+```sh
+wget https://github.com/jaegertracing/jaeger/releases/download/v1.65.0/jaeger-2.4.0-linux-amd64.tar.gz
+tar -xzf jaeger-2.4.0-linux-amd64.tar.gz
+sudo cp jaeger-2.4.0-linux-amd64/jaeger-all-in-one /usr/local/bin/
+rm -rf jaeger-2.4.0-linux-amd64 jaeger-2.4.0-linux-amd64.tar.gz
 ```
