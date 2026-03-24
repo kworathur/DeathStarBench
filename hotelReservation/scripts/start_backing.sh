@@ -33,7 +33,7 @@ echo "Memcached started on ports 11211-11214"
 
 # Start Jaeger all-in-one
 echo "Starting Jaeger..."
-jaeger-all-in-one &
+jaeger &
 JAEGER_PID=$!
 echo "$JAEGER_PID" > /tmp/hotel-jaeger.pid
 echo "Jaeger started (PID: $JAEGER_PID)"
