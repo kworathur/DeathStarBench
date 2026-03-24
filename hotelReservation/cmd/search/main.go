@@ -5,6 +5,8 @@ import (
 	"flag"
 	"io/ioutil"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"strconv"
@@ -66,6 +68,15 @@ func main() {
 		KnativeDns: knativeDNS,
 		Registry:   registry,
 	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigChan
+		log.Info().Msg("Received shutdown signal, deregistering from Consul...")
+		srv.Shutdown()
+		os.Exit(0)
+	}()
 
 	log.Info().Msg("Starting server...")
 	log.Fatal().Msg(srv.Run().Error())
