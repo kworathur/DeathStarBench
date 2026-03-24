@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/rs/zerolog/log"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -66,16 +67,27 @@ func initializeDatabase(url string) (*mongo.Client, func()) {
 	resCollection := database.Collection("reservation")
 	numCollection := database.Collection("number")
 
-	_, err = resCollection.InsertMany(context.TODO(), newReservations)
+	resCount, err := resCollection.CountDocuments(context.TODO(), bson.D{})
 	if err != nil {
-		log.Fatal().Msg(err.Error())
+		log.Panic().Msg(err.Error())
 	}
-
-	_, err = numCollection.InsertMany(context.TODO(), newNumbers)
+	numCount, err := numCollection.CountDocuments(context.TODO(), bson.D{})
 	if err != nil {
-		log.Fatal().Msg(err.Error())
+		log.Panic().Msg(err.Error())
 	}
-	log.Info().Msg("Successfully inserted test data into reservation DB")
+	if resCount == 0 && numCount == 0 {
+		_, err = resCollection.InsertMany(context.TODO(), newReservations)
+		if err != nil {
+			log.Fatal().Msg(err.Error())
+		}
+		_, err = numCollection.InsertMany(context.TODO(), newNumbers)
+		if err != nil {
+			log.Fatal().Msg(err.Error())
+		}
+		log.Info().Msg("Successfully inserted test data into reservation DB")
+	} else {
+		log.Info().Msg("Reservation DB already seeded, skipping insertion")
+	}
 
 	return client, func() {
 		if err := client.Disconnect(context.TODO()); err != nil {

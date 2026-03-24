@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/rs/zerolog/log"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -170,11 +171,19 @@ func initializeDatabase(url string) (*mongo.Client, func()) {
 	log.Info().Msg("Successfully connected to MongoDB")
 
 	collection := client.Database("profile-db").Collection("hotels")
-	_, err = collection.InsertMany(context.TODO(), newProfiles)
+	count, err := collection.CountDocuments(context.TODO(), bson.D{})
 	if err != nil {
-		log.Fatal().Msg(err.Error())
+		log.Panic().Msg(err.Error())
 	}
-	log.Info().Msg("Successfully inserted test data into profile DB")
+	if count == 0 {
+		_, err = collection.InsertMany(context.TODO(), newProfiles)
+		if err != nil {
+			log.Fatal().Msg(err.Error())
+		}
+		log.Info().Msg("Successfully inserted test data into profile DB")
+	} else {
+		log.Info().Msg("Profile DB already seeded, skipping insertion")
+	}
 
 	return client, func() {
 		if err := client.Disconnect(context.TODO()); err != nil {

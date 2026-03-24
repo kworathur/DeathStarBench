@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+
 	"github.com/rs/zerolog/log"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -71,25 +73,49 @@ func initializeDatabase(url string) (*mongo.Client, func()) {
 	log.Info().Msg("Successfully connected to MongoDB")
 
 	collectionH := client.Database("attractions-db").Collection("hotels")
-	_, err = collectionH.InsertMany(context.TODO(), newPoints)
+	countH, err := collectionH.CountDocuments(context.TODO(), bson.D{})
 	if err != nil {
-		log.Fatal().Msg(err.Error())
+		log.Panic().Msg(err.Error())
 	}
-	log.Info().Msg("Successfully inserted test data into museum DB")
+	if countH == 0 {
+		_, err = collectionH.InsertMany(context.TODO(), newPoints)
+		if err != nil {
+			log.Fatal().Msg(err.Error())
+		}
+		log.Info().Msg("Successfully inserted test data into attractions hotels DB")
+	} else {
+		log.Info().Msg("Attractions hotels DB already seeded, skipping insertion")
+	}
 
 	collectionR := client.Database("attractions-db").Collection("restaurants")
-	_, err = collectionR.InsertMany(context.TODO(), newRestaurants)
+	countR, err := collectionR.CountDocuments(context.TODO(), bson.D{})
 	if err != nil {
-		log.Fatal().Msg(err.Error())
+		log.Panic().Msg(err.Error())
 	}
-	log.Info().Msg("Successfully inserted test data into restaurant DB")
+	if countR == 0 {
+		_, err = collectionR.InsertMany(context.TODO(), newRestaurants)
+		if err != nil {
+			log.Fatal().Msg(err.Error())
+		}
+		log.Info().Msg("Successfully inserted test data into restaurant DB")
+	} else {
+		log.Info().Msg("Restaurant DB already seeded, skipping insertion")
+	}
 
 	collectionM := client.Database("attractions-db").Collection("museums")
-	_, err = collectionM.InsertMany(context.TODO(), newMuseums)
+	countM, err := collectionM.CountDocuments(context.TODO(), bson.D{})
 	if err != nil {
-		log.Fatal().Msg(err.Error())
+		log.Panic().Msg(err.Error())
 	}
-	log.Info().Msg("Successfully inserted test data into museum DB")
+	if countM == 0 {
+		_, err = collectionM.InsertMany(context.TODO(), newMuseums)
+		if err != nil {
+			log.Fatal().Msg(err.Error())
+		}
+		log.Info().Msg("Successfully inserted test data into museum DB")
+	} else {
+		log.Info().Msg("Museum DB already seeded, skipping insertion")
+	}
 
 	return client, func() {
 		if err := client.Disconnect(context.TODO()); err != nil {
