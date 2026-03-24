@@ -51,10 +51,10 @@ sudo systemctl start memcached
 sudo systemctl enable memcached
 
 # Jaeger (all-in-one)
-echo "  Installing jaeger-all-in-one..."
+echo "  Installing jaeger..."
 wget https://github.com/jaegertracing/jaeger/releases/download/v2.16.0/jaeger-2.16.0-linux-amd64.tar.gz
 tar -xzf jaeger-2.16.0-linux-amd64.tar.gz
-sudo cp jaeger-2.16.0-linux-amd64/jaeger-all-in-one /usr/local/bin/
+sudo cp jaeger-2.16.0-linux-amd64/jaeger /usr/local/bin/
 rm -rf jaeger-2.16.0-linux-amd64 jaeger-2.16.0-linux-amd64.tar.gz
 
 echo "=== Install complete ==="
