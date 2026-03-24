@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 HR_DIR="$REPO_ROOT/hotelReservation"
 
+sudo apt install -y golang-go
 echo "=== Compiling LuaJIT (wrk2) ==="
 make -C "$REPO_ROOT/wrk2"
 
