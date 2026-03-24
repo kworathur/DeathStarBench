@@ -27,3 +27,45 @@ If you use this benchmark suite in your work, we ask that you please cite the pa
 ## Beta-testing
 
 If you are interested in joining the beta-testing group for DeathStarBench, send us an email at: <microservices-bench-L@list.cornell.edu>
+
+## Testing on Cloudlab
+Tested on Ubuntu 22.04.2 LTS
+
+1. Clone project repository
+
+```sh
+git clone --recurse-submodules git@github.com:kworathur/DeathStarBench.git
+```
+
+2. Compile LuaJIT library from sources
+
+```sh
+cd DeathStarBench/wrk2 && make
+```
+
+3. Build server binaries for each microservice
+
+```sh
+cd DeathStarBench/hotelReservation
+go build -o bin/frontend ./cmd/frontend
+go build -o bin/search ./cmd/search
+go build -o bin/geo ./cmd/geo
+go build -o bin/rate ./cmd/rate
+go build -o bin/profile ./cmd/profile
+go build -o bin/recommendation ./cmd/recommendation
+go build -o bin/user ./cmd/user
+go build -o bin/reservation ./cmd/reservation
+go build -o bin/review ./cmd/review
+go build -o bin/attractions ./cmd/attractions
+```
+
+4. Install project dependencies
+
+Install consul
+```sh
+wget -O - https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update && sudo apt install consul
+```
+
+
