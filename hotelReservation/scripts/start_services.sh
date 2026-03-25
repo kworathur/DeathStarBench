@@ -4,6 +4,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BIN_DIR="$PROJECT_DIR/bin"
+LOG_DIR="/tmp/hotel-logs/services"
+STARTUP_WAIT_SECS="${HOTEL_STARTUP_WAIT_SECS:-1}"
 
 usage() {
     echo "Usage: start_services.sh [--config <path>] [--consul <addr>] [--jaeger <addr>]"
@@ -54,6 +56,8 @@ if [ ! -f "$CONFIG_PATH" ]; then
     exit 1
 fi
 
+mkdir -p "$LOG_DIR"
+
 cd "$PROJECT_DIR"
 
 COMMON_ARGS=(-config "$CONFIG_PATH")
@@ -71,14 +75,63 @@ fi
 if [ -n "$JAEGER_ADDR" ]; then
     echo "Overriding Jaeger address: $JAEGER_ADDR"
 fi
+echo "Service logs: $LOG_DIR"
+
+STARTED_SERVICES=()
+
+cleanup_started_services() {
+    if [ "${#STARTED_SERVICES[@]}" -eq 0 ]; then
+        return
+    fi
+
+    echo "Stopping services started before the failure..."
+    for (( idx=${#STARTED_SERVICES[@]}-1; idx>=0; idx-- )); do
+        svc="${STARTED_SERVICES[$idx]}"
+        pidfile="/tmp/hotel-$svc.pid"
+        if [ -f "$pidfile" ]; then
+            pid="$(cat "$pidfile")"
+            kill "$pid" 2>/dev/null || true
+            rm -f "$pidfile"
+            echo "  Stopped $svc (PID: $pid)"
+        fi
+    done
+}
+
+start_service() {
+    svc="$1"
+    binary="$BIN_DIR/$svc"
+    logfile="$LOG_DIR/$svc.log"
+
+    if [ ! -x "$binary" ]; then
+        echo "ERROR: Binary not found or not executable: $binary"
+        cleanup_started_services
+        exit 1
+    fi
+
+    : > "$logfile"
+    "$binary" "${COMMON_ARGS[@]}" > "$logfile" 2>&1 &
+    pid=$!
+    echo "$pid" > "/tmp/hotel-$svc.pid"
+
+    sleep "$STARTUP_WAIT_SECS"
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+        wait "$pid" || true
+        rm -f "/tmp/hotel-$svc.pid"
+        echo "ERROR: $svc exited during startup. Log: $logfile"
+        tail -n 20 "$logfile" || true
+        cleanup_started_services
+        exit 1
+    fi
+
+    STARTED_SERVICES+=("$svc")
+    echo "  Started $svc (PID: $pid, log: $logfile)"
+}
 
 # Start data-layer services first (they seed MongoDB on first run)
 echo "Starting data-layer services..."
 for svc in geo profile rate recommendation reservation user review attractions; do
-    "$BIN_DIR/$svc" "${COMMON_ARGS[@]}" &
-    echo $! > "/tmp/hotel-$svc.pid"
-    echo "  Started $svc (PID: $(cat /tmp/hotel-$svc.pid))"
-    sleep 0.5
+    start_service "$svc"
 done
 
 # Brief pause to let data-layer services register with Consul
@@ -87,10 +140,7 @@ sleep 1
 # Start stateless services
 echo "Starting stateless services..."
 for svc in search frontend; do
-    "$BIN_DIR/$svc" "${COMMON_ARGS[@]}" &
-    echo $! > "/tmp/hotel-$svc.pid"
-    echo "  Started $svc (PID: $(cat /tmp/hotel-$svc.pid))"
-    sleep 0.5
+    start_service "$svc"
 done
 
 echo ""
