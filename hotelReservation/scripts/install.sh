@@ -10,6 +10,7 @@ sudo apt update
 sudo apt-get install -y libssl-dev
 sudo apt install -y zlib1g zlib1g-dev
 sudo apt-get install -y luarocks
+sudo luarocks install luasocket
 
 echo "=== Compiling LuaJIT (wrk2) ==="
 make -C "$REPO_ROOT/wrk2"
