@@ -79,7 +79,55 @@ flowchart LR
 
 ## Running the hotel reservation application
 
-For instructions on running the server binaries as processes outside of docker, please refer to the instructions [here](../README.md).
+### As Processes
+
+To run the microservices as bare processes (no Docker), first follow the [installation instructions](../README.md).
+
+1. Start backing services (Consul, MongoDB, Memcached, Jaeger):
+
+```bash
+./scripts/start_backing.sh
+```
+
+2. Start all microservices:
+
+```bash
+./scripts/start_services.sh
+```
+
+The script automatically picks up `config.local.json` if present. You can override with flags:
+
+```bash
+./scripts/start_services.sh --config /path/to/config.json --consul 10.0.0.1:8500 --jaeger 10.0.0.2:6831
+```
+
+To start a single service (e.g. for the placement algorithm):
+
+```bash
+./scripts/start_service.sh <service_name> [--config <path>] [--consul <addr>] [--jaeger <addr>]
+```
+
+3. Stop everything:
+
+```bash
+./scripts/stop_all.sh
+```
+
+4. Verify the deployment:
+
+```bash
+# Check Consul registration
+curl http://localhost:8500/v1/catalog/services
+
+# Test the frontend
+curl "http://localhost:5000/hotels?inDate=2015-04-09&outDate=2015-04-10&lat=38.0235&lon=-122.095"
+```
+
+Service logs are written to `/tmp/hotel-logs/`.
+
+### In Docker Containers
+
+
 ### Before you start
 - Install Docker and Docker Compose.
 - Make sure exposed ports in docker-compose files are available
