@@ -6,10 +6,70 @@ The application implements a hotel reservation service, build with Go and gRPC, 
 
 <!-- ![Social Network Architecture](socialNet_arch.png) -->
 
-Supported actions: 
+Supported actions:
 * Get profile and rates of nearby hotels available during given time periods
 * Recommend hotels based on user provided metrics
 * Place reservations
+
+## Request Call Graphs
+
+The benchmark workload uses four request types (from `wrk2/scripts/hotel-reservation/mixed-workload_type_1.lua`):
+
+- `GET /hotels` with 60% probability
+- `GET /recommendations` with 39% probability
+- `POST /user` with 0.5% probability
+- `POST /reservation` with 0.5% probability
+
+### `GET /hotels`
+
+```mermaid
+flowchart LR
+    C[Client] --> F[Frontend /hotels]
+    F --> S[Search.Nearby]
+    S --> G[Geo.Nearby]
+    S --> R1[Rate.GetRates]
+    R1 --> MR[(Memcached Rate)]
+    R1 --> MGR[(Mongo rate-db.inventory)]
+    F --> RS[Reservation.CheckAvailability]
+    RS --> MRS[(Memcached Reserve)]
+    RS --> MGS[(Mongo reservation-db)]
+    F --> P[Profile.GetProfiles]
+    P --> MP[(Memcached Profile)]
+    P --> MGP[(Mongo profile-db.hotels)]
+```
+
+### `GET /recommendations`
+
+```mermaid
+flowchart LR
+    C[Client] --> F[Frontend /recommendations]
+    F --> R[Recommendation.GetRecommendations]
+    R -. startup load .-> MGR[(Mongo recommendation-db)]
+    F --> P[Profile.GetProfiles]
+    P --> MP[(Memcached Profile)]
+    P --> MGP[(Mongo profile-db.hotels)]
+```
+
+### `POST /user`
+
+```mermaid
+flowchart LR
+    C[Client] --> F[Frontend /user]
+    F --> U[User.CheckUser]
+    U -. startup load .-> MGU[(Mongo user-db)]
+```
+
+### `POST /reservation`
+
+```mermaid
+flowchart LR
+    C[Client] --> F[Frontend /reservation]
+    F --> U[User.CheckUser]
+    U -. startup load .-> MGU[(Mongo user-db)]
+    F --> R[Reservation.MakeReservation]
+    R --> MR[(Memcached Reserve)]
+    R --> MGR[(Mongo reservation-db)]
+```
 
 ## Pre-requirements
 - Docker
@@ -18,6 +78,8 @@ Supported actions:
 - luasocket (luarocks install luasocket)
 
 ## Running the hotel reservation application
+
+For instructions on running the server binaries as processes outside of docker, please refer to the instructions [here](../README.md).
 ### Before you start
 - Install Docker and Docker Compose.
 - Make sure exposed ports in docker-compose files are available

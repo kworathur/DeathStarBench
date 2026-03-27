@@ -41,68 +41,12 @@ Pre-requisites
 git clone --recurse-submodules git@github.com:kworathur/DeathStarBench.git
 ```
 
-2. Compile LuaJIT library from sources
+2. Install all dependencies, compile wrk2, and build service binaries
 
 ```sh
-sudo apt update
-sudo apt-get install libssl-dev
-sudo apt install zlib1g zlib1g-dev
-sudo apt-get install luarocks 
-cd DeathStarBench/wrk2 && make
+cd DeathStarBench
+chmod +x hotelReservation/scripts/install.sh
+./hotelReservation/scripts/install.sh
 ```
 
-3. Build server binaries for each microservice
-
-```sh
-sudo apt install golang-go
-cd DeathStarBench/hotelReservation
-go build -o bin/frontend ./cmd/frontend
-go build -o bin/search ./cmd/search
-go build -o bin/geo ./cmd/geo
-go build -o bin/rate ./cmd/rate
-go build -o bin/profile ./cmd/profile
-go build -o bin/recommendation ./cmd/recommendation
-go build -o bin/user ./cmd/user
-go build -o bin/reservation ./cmd/reservation
-go build -o bin/review ./cmd/review
-go build -o bin/attractions ./cmd/attractions
-```
-
-4. Install project dependencies
-
-Install consul
-```sh
-wget -O - https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-sudo apt update && sudo apt install consul
-```
-
-Install mongodb 
-
-```sh
-sudo apt-get install gnupg curl
-curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
-   sudo gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg \
-   --dearmor
-echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/8.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list
-sudo apt-get update
-sudo apt-get install -y mongodb-org
-sudo systemctl start mongod
-```
-
-Install memcached
-
-```sh
-sudo apt install memcached libmemcached-tools
-sudo systemctl start memcached
-sudo systemctl enable memcached
-```
-
-Install Jaeger (all-in-one)
-
-```sh
-wget https://github.com/jaegertracing/jaeger/releases/download/v2.16.0/jaeger-2.16.0-linux-amd64.tar.gz
-tar -xzf jaeger-2.16.0-linux-amd64.tar.gz
-sudo cp jaeger-2.16.0-linux-amd64/jaeger /usr/local/bin/
-rm -rf jaeger-2.16.0-linux-amd64 jaeger-2.16.0-linux-amd64.tar.gz
-```
+This script installs wrk2 build dependencies, compiles LuaJIT, installs Go, builds all hotel reservation service binaries, and installs backing services (Consul, MongoDB, Memcached, Jaeger).
