@@ -60,7 +60,13 @@ rm -rf jaeger-2.16.0-linux-amd64 jaeger-2.16.0-linux-amd64.tar.gz
 echo "	Installing powerstat..."
 sudo apt install powerstat
 
-echo "	Installing linux-tools..."
-sudo apt install linux-tools-common linux-tools-generic
+echo "	Installing plotting dependencies..."
+sudo apt install -y python3-matplotlib
+
+echo "	Installing remote orchestration dependencies..."
+sudo apt install -y python3-paramiko
+
+echo "	Installing cpupower dependencies..."
+sudo apt-get install -y linux-tools-common "linux-tools-$(uname -r)"
 
 echo "=== Install complete ==="

@@ -169,6 +169,40 @@ Read the Readme file in Kubernetes directory.
 ../wrk2/wrk -D exp -t <num-threads> -c <num-conns> -d <duration> -L -s ./wrk2/scripts/hotel-reservation/mixed-workload_type_1.lua http://x.x.x.x:5000 -R <reqs-per-sec>
 ```
 
+To benchmark a single frontend endpoint with Poisson arrivals while collecting power under different CPU governors, use:
+
+```bash
+./scripts/run_power_sweep.sh --target hotels --governor schedutil --rates 100:500:100
+./scripts/run_power_sweep.sh --target hotels --governor performance --rates 100:500:100
+```
+
+The script:
+
+- uses `wrk2` with `-D exp` and `wrk2/scripts/hotel-reservation/single-endpoint.lua`
+- targets one frontend request type at a time: `hotels`, `recommendations`, `reservation`, or `user`
+- switches the requested CPU governor with `sudo` before the sweep
+- measures average power with `powerstat`
+- writes per-run logs plus a `results.csv`
+- generates `arrival_rate_vs_power.png` for the requested governor run
+
+To clone or refresh the repo across experiment nodes and run one target per host in parallel, use:
+
+```bash
+./scripts/run_distributed_power_sweeps.sh \
+  --hosts node1,node2,node3,node4 \
+  --ssh-user <user> \
+  --ssh-key ~/.ssh/<cloudlab-key> \
+  --private-key ~/.ssh/<github-deploy-key>
+```
+
+The distributed entrypoint is now a Python orchestrator, aligned with the remote setup flow used in `envoy-imbalancer-exp`:
+
+- `scripts/power_sweep_remote_config.py` holds reusable node/auth defaults
+- `scripts/power_sweep_remote_util.py` provides shared Paramiko helpers
+- `scripts/run_distributed_power_sweeps.py` bootstraps remote checkouts and runs governor phases in parallel
+
+Use `--refresh-repo` to `git fetch` and `git pull --ff-only` on existing remote checkouts before starting a new sweep.
+
 ### Questions and contact
 
 You are welcome to submit a pull request if you find a bug or have extended the application in an interesting way. For any questions please contact us at: <microservices-bench-L@list.cornell.edu>
