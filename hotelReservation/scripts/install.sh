@@ -57,4 +57,10 @@ tar -xzf jaeger-2.16.0-linux-amd64.tar.gz
 sudo cp jaeger-2.16.0-linux-amd64/jaeger /usr/local/bin/
 rm -rf jaeger-2.16.0-linux-amd64 jaeger-2.16.0-linux-amd64.tar.gz
 
+echo "	Installing powerstat..."
+sudo apt install powerstat
+
+echo "	Installing linux-tools..."
+sudo apt install linux-tools-common linux-tools-generic
+
 echo "=== Install complete ==="
