@@ -113,6 +113,10 @@ def ensure_remote_checkout(
         git_host = git_host_from_url(clone_repo_url)
         remote_repo_root = expand_remote_path(remote_repo_root)
         remote_key_path = expand_remote_path(remote_key_path)
+        if remote_repo_root.startswith("~/"):
+            remote_repo_root = f"$HOME/{remote_repo_root[2:]}"
+        if remote_key_path.startswith("~/"):
+            remote_key_path = f"$HOME/{remote_key_path[2:]}"
         remote_parent = str(Path(remote_repo_root).parent)
 
         run_remote_command(conn, f"mkdir -p {shlex.quote(remote_parent)}", must_succeed=True)
