@@ -1,0 +1,21 @@
+target,arrival_rate_rps,requests_sec,latency_avg,latency_stdev,latency_max,p50,p90,p99,socket_errors,non_2xx_3xx,wrk_output
+hotels,1000,1000.98,1.62ms,295.87us,2.70ms,1.58ms,1.94ms,2.70ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_1000.log
+hotels,2000,1998.51,1.74ms,382.53us,3.14ms,1.67ms,2.21ms,3.14ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_2000.log
+hotels,3000,3003.55,1.88ms,478.30us,3.60ms,1.77ms,2.49ms,3.60ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_3000.log
+hotels,4000,3995.97,2.05ms,588.44us,4.16ms,1.90ms,2.81ms,4.16ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_4000.log
+hotels,5000,5003.62,2.26ms,722.09us,4.83ms,2.08ms,3.16ms,4.83ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_5000.log
+hotels,6000,6005.18,2.56ms,0.91ms,5.78ms,2.34ms,3.67ms,5.78ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_6000.log
+hotels,7000,6983.87,2.98ms,1.23ms,7.21ms,2.69ms,4.42ms,7.21ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_7000.log
+hotels,8000,7983.18,3.67ms,1.66ms,9.70ms,3.27ms,5.73ms,9.70ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_8000.log
+hotels,9000,9003.43,4.92ms,2.55ms,14.32ms,4.26ms,8.10ms,14.32ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_9000.log
+hotels,10000,10003.14,7.52ms,4.64ms,24.78ms,6.18ms,13.22ms,24.78ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_10000.log
+hotels,11000,11004.31,13.99ms,10.33ms,52.80ms,10.73ms,26.72ms,52.80ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_11000.log
+hotels,12000,11998.15,62.19ms,57.81ms,274.43ms,44.22ms,136.19ms,274.43ms,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_12000.log
+hotels,13000,12194.54,3.79s,2.00s,8.11s,3.71s,6.46s,8.11s,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_13000.log
+hotels,14000,12250.98,8.18s,4.02s,15.63s,8.18s,13.65s,15.63s,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_14000.log
+hotels,15000,12232.04,11.85s,5.89s,22.18s,11.85s,19.96s,22.18s,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_15000.log
+hotels,16000,12233.95,15.36s,7.51s,28.41s,15.35s,25.72s,28.41s,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_16000.log
+hotels,17000,12242.63,18.20s,8.88s,33.65s,18.19s,30.52s,33.65s,"none",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_17000.log
+hotels,18000,12227.75,20.83s,10.17s,38.40s,20.76s,34.90s,38.40s,"connect 0, read 0, write 0, timeout 1",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_18000.log
+hotels,19000,12240.03,22.88s,11.29s,42.34s,22.90s,38.57s,42.34s,"connect 0, read 0, write 0, timeout 1",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_19000.log
+hotels,20000,12217.14,25.32s,12.34s,46.43s,25.30s,42.37s,46.43s,"connect 0, read 0, write 0, timeout 11",0,/users/sabd/DeathStarBench/hotelReservation/results/client_load_sweeps/20260331T203937Z_hotels/logs/wrk_hotels_20000.log
