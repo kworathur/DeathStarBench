@@ -52,16 +52,21 @@ func getLocalIP() (string, error) {
 		// by default, return the first network IP address found.
 		ipGrpc = ips[0].String()
 
-		grpcNet := os.Getenv("DSB_GRPC_NETWORK")
-		_, ipNetGrpc, err := net.ParseCIDR(grpcNet)
-		if err != nil {
-			log.Error().Msgf("An invalid network CIDR is set in environment DSB_HOTELRESERV_GRPC_NETWORK: %v", grpcNet)
-		} else {
-			for _, ip := range ips {
-				if ipNetGrpc.Contains(ip) {
-					ipGrpc = ip.String()
-					log.Info().Msgf("gRPC traffic is routed to the dedicated network %s", ipGrpc)
-					break
+		grpcNet := os.Getenv("DSB_HOTELRESERV_GRPC_NETWORK")
+		if grpcNet == "" {
+			grpcNet = os.Getenv("DSB_GRPC_NETWORK")
+		}
+		if grpcNet != "" {
+			_, ipNetGrpc, err := net.ParseCIDR(grpcNet)
+			if err != nil {
+				log.Error().Msgf("An invalid network CIDR is set in environment DSB_HOTELRESERV_GRPC_NETWORK: %v", grpcNet)
+			} else {
+				for _, ip := range ips {
+					if ipNetGrpc.Contains(ip) {
+						ipGrpc = ip.String()
+						log.Info().Msgf("gRPC traffic is routed to the dedicated network %s", ipGrpc)
+						break
+					}
 				}
 			}
 		}

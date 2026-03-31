@@ -6,6 +6,8 @@
 bin
 build
 
+hotelReservation/scripts/__pycache__/*
+
 wrk2/wrk
 wrk2/*.[oa]
 wrk2/obj/

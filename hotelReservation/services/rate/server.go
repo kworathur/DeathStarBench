@@ -132,22 +132,28 @@ func (s *Server) GetRates(ctx context.Context, req *pb.Request) (*pb.Result, err
 		for hotelId := range rateMap {
 			go func(id string) {
 				log.Trace().Msgf("memc miss, hotelId = %s", id)
-				log.Trace().Msg("memcached miss, set up mongo connection")
+				log.Trace().Msg("memcached miss, querying mongo for the requested hotel and date range")
 
 				mongoSpan, _ := opentracing.StartSpanFromContext(ctx, "mongo_rate")
 				mongoSpan.SetTag("span.kind", "client")
 
-				// memcached miss, set up mongo connection
 				collection := s.MongoClient.Database("rate-db").Collection("inventory")
-				curr, err := collection.Find(context.TODO(), bson.D{})
+				filter := bson.D{
+					{"hotelId", id},
+					{"inDate", bson.D{{"$lte", req.InDate}}},
+					{"outDate", bson.D{{"$gte", req.OutDate}}},
+				}
+				curr, err := collection.Find(context.TODO(), filter)
 				if err != nil {
-					log.Error().Msgf("Failed get rate data: ", err)
+					log.Error().Msgf("Failed to get rate data for hotel %s: %v", id, err)
 				}
 
 				tmpRatePlans := make(RatePlans, 0)
-				curr.All(context.TODO(), &tmpRatePlans)
-				if err != nil {
-					log.Error().Msgf("Failed get rate data: ", err)
+				if curr != nil {
+					if err := curr.All(context.TODO(), &tmpRatePlans); err != nil {
+						log.Error().Msgf("Failed to decode rate data for hotel %s: %v", id, err)
+						tmpRatePlans = nil
+					}
 				}
 
 				mongoSpan.Finish()

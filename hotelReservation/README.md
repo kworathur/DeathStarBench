@@ -6,10 +6,70 @@ The application implements a hotel reservation service, build with Go and gRPC, 
 
 <!-- ![Social Network Architecture](socialNet_arch.png) -->
 
-Supported actions: 
+Supported actions:
 * Get profile and rates of nearby hotels available during given time periods
 * Recommend hotels based on user provided metrics
 * Place reservations
+
+## Request Call Graphs
+
+The benchmark workload uses four request types (from `wrk2/scripts/hotel-reservation/mixed-workload_type_1.lua`):
+
+- `GET /hotels` with 60% probability
+- `GET /recommendations` with 39% probability
+- `POST /user` with 0.5% probability
+- `POST /reservation` with 0.5% probability
+
+### `GET /hotels`
+
+```mermaid
+flowchart LR
+    C[Client] --> F[Frontend /hotels]
+    F --> S[Search.Nearby]
+    S --> G[Geo.Nearby]
+    S --> R1[Rate.GetRates]
+    R1 --> MR[(Memcached Rate)]
+    R1 --> MGR[(Mongo rate-db.inventory)]
+    F --> RS[Reservation.CheckAvailability]
+    RS --> MRS[(Memcached Reserve)]
+    RS --> MGS[(Mongo reservation-db)]
+    F --> P[Profile.GetProfiles]
+    P --> MP[(Memcached Profile)]
+    P --> MGP[(Mongo profile-db.hotels)]
+```
+
+### `GET /recommendations`
+
+```mermaid
+flowchart LR
+    C[Client] --> F[Frontend /recommendations]
+    F --> R[Recommendation.GetRecommendations]
+    R -. startup load .-> MGR[(Mongo recommendation-db)]
+    F --> P[Profile.GetProfiles]
+    P --> MP[(Memcached Profile)]
+    P --> MGP[(Mongo profile-db.hotels)]
+```
+
+### `POST /user`
+
+```mermaid
+flowchart LR
+    C[Client] --> F[Frontend /user]
+    F --> U[User.CheckUser]
+    U -. startup load .-> MGU[(Mongo user-db)]
+```
+
+### `POST /reservation`
+
+```mermaid
+flowchart LR
+    C[Client] --> F[Frontend /reservation]
+    F --> U[User.CheckUser]
+    U -. startup load .-> MGU[(Mongo user-db)]
+    F --> R[Reservation.MakeReservation]
+    R --> MR[(Memcached Reserve)]
+    R --> MGR[(Mongo reservation-db)]
+```
 
 ## Pre-requirements
 - Docker
@@ -18,6 +78,56 @@ Supported actions:
 - luasocket (luarocks install luasocket)
 
 ## Running the hotel reservation application
+
+### As Processes
+
+To run the microservices as bare processes (no Docker), first follow the [installation instructions](../README.md).
+
+1. Start backing services (Consul, MongoDB, Memcached, Jaeger):
+
+```bash
+./scripts/start_backing.sh
+```
+
+2. Start all microservices:
+
+```bash
+./scripts/start_services.sh
+```
+
+The script automatically picks up `config.local.json` if present. You can override with flags:
+
+```bash
+./scripts/start_services.sh --config /path/to/config.json --consul 10.0.0.1:8500 --jaeger 10.0.0.2:6831
+```
+
+To start a single service (e.g. for the placement algorithm):
+
+```bash
+./scripts/start_service.sh <service_name> [--config <path>] [--consul <addr>] [--jaeger <addr>]
+```
+
+3. Stop everything:
+
+```bash
+./scripts/stop_all.sh
+```
+
+4. Verify the deployment:
+
+```bash
+# Check Consul registration
+curl http://localhost:8500/v1/catalog/services
+
+# Test the frontend
+curl "http://localhost:5000/hotels?inDate=2015-04-09&outDate=2015-04-10&lat=38.0235&lon=-122.095"
+```
+
+Service logs are written to `/tmp/hotel-logs/`.
+
+### In Docker Containers
+
+
 ### Before you start
 - Install Docker and Docker Compose.
 - Make sure exposed ports in docker-compose files are available
@@ -58,6 +168,40 @@ Read the Readme file in Kubernetes directory.
 ```bash
 ../wrk2/wrk -D exp -t <num-threads> -c <num-conns> -d <duration> -L -s ./wrk2/scripts/hotel-reservation/mixed-workload_type_1.lua http://x.x.x.x:5000 -R <reqs-per-sec>
 ```
+
+To benchmark a single frontend endpoint with Poisson arrivals while collecting power under different CPU governors, use:
+
+```bash
+./scripts/run_power_sweep.sh --target hotels --governor schedutil --rates 1000:7000:1000
+./scripts/run_power_sweep.sh --target hotels --governor performance --rates 1000:7000:1000
+```
+
+The script:
+
+- uses `wrk2` with `-D exp` and `wrk2/scripts/hotel-reservation/single-endpoint.lua`
+- targets one frontend request type at a time: `hotels`, `recommendations`, `reservation`, or `user`
+- switches the requested CPU governor with `sudo` before the sweep
+- measures average power with `powerstat`
+- writes per-run logs plus a `results.csv`
+- generates `arrival_rate_vs_power.png` for the requested governor run
+
+To clone or refresh the repo across experiment nodes and run one target per host in parallel, use:
+
+```bash
+./scripts/run_distributed_power_sweeps.sh \
+  --hosts node1,node2,node3,node4 \
+  --ssh-user <user> \
+  --ssh-key ~/.ssh/<cloudlab-key> \
+  --private-key ~/.ssh/<github-deploy-key>
+```
+
+The distributed entrypoint is now a Python orchestrator, aligned with the remote setup flow used in `envoy-imbalancer-exp`:
+
+- `scripts/power_sweep_remote_config.py` holds reusable node/auth defaults
+- `scripts/power_sweep_remote_util.py` provides shared Paramiko helpers
+- `scripts/run_distributed_power_sweeps.py` bootstraps remote checkouts and runs governor phases in parallel
+
+Use `--refresh-repo` to `git fetch` and `git pull --ff-only` on existing remote checkouts before starting a new sweep.
 
 ### Questions and contact
 

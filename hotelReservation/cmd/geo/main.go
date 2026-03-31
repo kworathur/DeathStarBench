@@ -1,13 +1,14 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
-	"io/ioutil"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
+	"github.com/delimitrou/DeathStarBench/tree/master/hotelReservation/config"
 	"github.com/delimitrou/DeathStarBench/tree/master/hotelReservation/registry"
 	"github.com/delimitrou/DeathStarBench/tree/master/hotelReservation/services/geo"
 	"github.com/delimitrou/DeathStarBench/tree/master/hotelReservation/tracing"
@@ -21,17 +22,11 @@ func main() {
 	log.Logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}).With().Timestamp().Caller().Logger()
 
 	log.Info().Msg("Reading config...")
-	jsonFile, err := os.Open("config.json")
+	result, configPath, err := config.LoadWithConfigFlag(os.Args[1:], "config.json")
 	if err != nil {
-		log.Error().Msgf("Got error while reading config: %v", err)
+		log.Fatal().Msgf("Got error while reading config: %v", err)
 	}
-
-	defer jsonFile.Close()
-
-	byteValue, _ := ioutil.ReadAll(jsonFile)
-
-	var result map[string]string
-	json.Unmarshal([]byte(byteValue), &result)
+	log.Info().Msgf("Loaded config from %s", *configPath)
 
 	log.Info().Msg("Initializing DB connection...")
 	mongoClient, mongoClose := initializeDatabase(result["GeoMongoAddress"])
@@ -67,6 +62,15 @@ func main() {
 		Registry:    registry,
 		MongoClient: mongoClient,
 	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigChan
+		log.Info().Msg("Received shutdown signal, deregistering from Consul...")
+		srv.Shutdown()
+		os.Exit(0)
+	}()
 
 	log.Info().Msg("Starting server...")
 	log.Fatal().Msg(srv.Run().Error())

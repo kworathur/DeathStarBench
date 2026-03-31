@@ -27,3 +27,26 @@ If you use this benchmark suite in your work, we ask that you please cite the pa
 ## Beta-testing
 
 If you are interested in joining the beta-testing group for DeathStarBench, send us an email at: <microservices-bench-L@list.cornell.edu>
+
+## Testing on Cloudlab
+
+Pre-requisites
+
+* A github public/private key pair
+* Tested on Ubuntu 22.04.2 LTS
+
+1. Clone project repository
+
+```sh
+git clone --recurse-submodules git@github.com:kworathur/DeathStarBench.git
+```
+
+2. Install all dependencies, compile wrk2, and build service binaries
+
+```sh
+cd DeathStarBench
+chmod +x hotelReservation/scripts/install.sh
+./hotelReservation/scripts/install.sh
+```
+
+This script installs wrk2 build dependencies, compiles LuaJIT, installs Go, builds all hotel reservation service binaries, and installs backing services (Consul, MongoDB, Memcached, Jaeger).

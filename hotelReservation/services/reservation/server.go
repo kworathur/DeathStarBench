@@ -25,6 +25,14 @@ import (
 
 const name = "srv-reservation"
 
+func reservationCacheKey(hotelID, inDate, outDate string) string {
+	return hotelID + "_" + inDate + "_" + outDate
+}
+
+func reservationCapacityKey(hotelID string) string {
+	return hotelID + "_cap"
+}
+
 // Server implements the user service
 type Server struct {
 	pb.UnimplementedReservationServer
@@ -115,11 +123,11 @@ func (s *Server) MakeReservation(ctx context.Context, req *pb.Request) (*pb.Resu
 	for inDate.Before(outDate) {
 		// check reservations
 		count := 0
-		inDate = inDate.AddDate(0, 0, 1)
-		outdate := inDate.String()[0:10]
+		nextDate := inDate.AddDate(0, 0, 1)
+		outdate := nextDate.String()[0:10]
 
 		// first check memc
-		memc_key := hotelId + "_" + inDate.String()[0:10] + "_" + outdate
+		memc_key := reservationCacheKey(hotelId, indate, outdate)
 		item, err := s.MemcClient.Get(memc_key)
 		if err == nil {
 			// memcached hit
@@ -154,7 +162,7 @@ func (s *Server) MakeReservation(ctx context.Context, req *pb.Request) (*pb.Resu
 
 		// check capacity
 		// check memc capacity
-		memc_cap_key := hotelId + "_cap"
+		memc_cap_key := reservationCapacityKey(hotelId)
 		item, err = s.MemcClient.Get(memc_cap_key)
 		hotel_cap := 0
 		if err == nil {
@@ -180,6 +188,7 @@ func (s *Server) MakeReservation(ctx context.Context, req *pb.Request) (*pb.Resu
 			return res, nil
 		}
 		indate = outdate
+		inDate = nextDate
 	}
 
 	// only update reservation number cache after check succeeds
@@ -229,7 +238,7 @@ func (s *Server) CheckAvailability(ctx context.Context, req *pb.Request) (*pb.Re
 	for _, hotelId := range req.HotelId {
 		hotelMemKeys = append(hotelMemKeys, hotelId+"_cap")
 		resMap[hotelId] = true
-		keysMap[hotelId+"_cap"] = struct{}{}
+		keysMap[reservationCapacityKey(hotelId)] = struct{}{}
 	}
 
 	capMemSpan, _ := opentracing.StartSpanFromContext(ctx, "memcached_capacity_get_multi_number")
@@ -254,7 +263,7 @@ func (s *Server) CheckAvailability(ctx context.Context, req *pb.Request) (*pb.Re
 	cacheCap := make(map[string]int)
 	for k, v := range cacheMemRes {
 		hotelCap, _ := strconv.Atoi(string(v.Value))
-		cacheCap[k] = hotelCap
+		cacheCap[strings.TrimSuffix(k, "_cap")] = hotelCap
 	}
 	if len(misKeys) > 0 {
 		queryMissKeys := []string{}
@@ -264,7 +273,7 @@ func (s *Server) CheckAvailability(ctx context.Context, req *pb.Request) (*pb.Re
 		var nums []number
 		capMongoSpan, _ := opentracing.StartSpanFromContext(ctx, "mongodb_capacity_get_multi_number")
 		capMongoSpan.SetTag("span.kind", "client")
-		curr, err := numCollection.Find(context.TODO(), bson.D{{"$in", queryMissKeys}})
+		curr, err := numCollection.Find(context.TODO(), bson.D{{"hotelId", bson.D{{"$in", queryMissKeys}}}})
 		if err != nil {
 			log.Error().Msgf("Failed get reservation number data: ", err)
 		}
@@ -279,7 +288,7 @@ func (s *Server) CheckAvailability(ctx context.Context, req *pb.Request) (*pb.Re
 		for _, num := range nums {
 			cacheCap[num.HotelId] = num.Number
 			// we don't care set successfully or not
-			go s.MemcClient.Set(&memcache.Item{Key: num.HotelId + "_cap", Value: []byte(strconv.Itoa(num.Number))})
+			go s.MemcClient.Set(&memcache.Item{Key: reservationCapacityKey(num.HotelId), Value: []byte(strconv.Itoa(num.Number))})
 		}
 	}
 
@@ -297,7 +306,7 @@ func (s *Server) CheckAvailability(ctx context.Context, req *pb.Request) (*pb.Re
 			indate := inDate.String()[:10]
 			inDate = inDate.AddDate(0, 0, 1)
 			outDate := inDate.String()[:10]
-			memcKey := hotelId + "_" + outDate + "_" + outDate
+			memcKey := reservationCacheKey(hotelId, indate, outDate)
 			reqCommand = append(reqCommand, memcKey)
 			queryMap[memcKey] = map[string]string{
 				"hotelId":   hotelId,
@@ -378,7 +387,7 @@ func (s *Server) CheckAvailability(ctx context.Context, req *pb.Request) (*pb.Re
 					}
 					var count int
 					for _, r := range reserve {
-						log.Trace().Msgf("reservation check reservation number = %d", queryItem["hotelId"])
+						log.Trace().Msgf("reservation check reservation count for hotel %s", queryItem["hotelId"])
 						count += r.Number
 					}
 					// update memcached
