@@ -8,6 +8,7 @@ REPO_ROOT=$(cd -- "$HOTEL_ROOT/.." && pwd)
 WRK_BIN="$REPO_ROOT/wrk2/wrk"
 LUA_SCRIPT="$REPO_ROOT/hotelReservation/wrk2/scripts/hotel-reservation/single-endpoint.lua"
 PLOT_SCRIPT="$REPO_ROOT/hotelReservation/scripts/plot_power_sweep.py"
+METRICS_SCRIPT="$REPO_ROOT/hotelReservation/scripts/parse_wrk_metrics.py"
 
 TARGET="hotels"
 HOST="http://localhost:5000"
@@ -15,6 +16,7 @@ THREADS=2
 CONNECTIONS=2
 DURATION_SECONDS=30
 RATES_SPEC="1000:7000:1000"
+MODE="combined"
 GOVERNOR=""
 POWERSTAT_INTERVAL=0.5
 SETTLE_SECONDS=5
@@ -26,11 +28,12 @@ usage() {
 Usage: run_power_sweep.sh [options]
 
 Sweeps wrk2 Poisson arrival rates against one hotelReservation frontend endpoint,
-records average power via powerstat, and generates a per-governor plot.
+optionally records average power via powerstat, and generates a per-governor plot.
 
 Options:
+  --mode <combined|client|server-power>
   --target <hotels|recommendations|reservation|user>
-  --governor <schedutil|performance>   Required. Run once per governor.
+  --governor <schedutil|performance>   Required for modes that manage server frequency.
   --host <url>                         Frontend base URL. Default: http://localhost:5000
   --threads <n>                       wrk2 thread count. Default: 2
   --connections <n>                   wrk2 connection count. Default: 2
@@ -44,6 +47,7 @@ Options:
 
 Example:
   ./hotelReservation/scripts/run_power_sweep.sh \
+    --mode combined \
     --target hotels \
     --governor schedutil \
     --rates 1000:7000:1000 \
@@ -262,50 +266,84 @@ extract_requests_per_sec() {
 }
 
 run_single_point() {
-  local governor=$1
-  local rate=$2
-  local source=$3
-  local count=$4
+  local mode=$1
+  local governor=$2
+  local rate=$3
+  local source=$4
+  local count=$5
 
   local wrk_output="$OUTPUT_DIR/logs/wrk_${TARGET}_${governor}_${rate}.log"
   local power_output="$OUTPUT_DIR/logs/powerstat_${TARGET}_${governor}_${rate}.log"
   local powerstat_pid=""
+  local avg_power="NA"
+  local req_per_sec="NA"
+  local latency_avg_ms="NA"
+  local latency_stdev_ms="NA"
+  local latency_max_ms="NA"
+  local p50_ms="NA"
+  local p90_ms="NA"
+  local p95_ms="NA"
+  local p99_ms="NA"
 
-  local -a powerstat_cmd=(sudo powerstat -n)
-  if [[ "$source" == "rapl" ]]; then
-    powerstat_cmd+=( -R )
+  echo "Running mode=$mode target=$TARGET governor=$governor rate=${rate}rps"
+
+  if [[ "$mode" == "combined" || "$mode" == "server-power" ]]; then
+    local -a powerstat_cmd=(sudo powerstat -n)
+    if [[ "$source" == "rapl" ]]; then
+      powerstat_cmd+=( -R )
+    fi
+    powerstat_cmd+=( "$POWERSTAT_INTERVAL" "$count" )
+    "${powerstat_cmd[@]}" >"$power_output" 2>&1 &
+    powerstat_pid=$!
+    sleep 0.2
   fi
-  powerstat_cmd+=( "$POWERSTAT_INTERVAL" "$count" )
 
-  echo "Running target=$TARGET governor=$governor rate=${rate}rps"
-  "${powerstat_cmd[@]}" >"$power_output" 2>&1 &
-  powerstat_pid=$!
-  sleep 0.2
+  if [[ "$mode" == "combined" || "$mode" == "client" ]]; then
+    HOTEL_RESERVATION_TARGET="$TARGET" \
+      "$WRK_BIN" -D exp -t "$THREADS" -c "$CONNECTIONS" -d "${CLIENT_DURATION_SECONDS}s" -L \
+      -s "$LUA_SCRIPT" "$HOST" -R "$rate" >"$wrk_output" 2>&1 || {
+        if [[ -n "$powerstat_pid" ]]; then
+          kill "$powerstat_pid" >/dev/null 2>&1 || true
+          wait "$powerstat_pid" >/dev/null 2>&1 || true
+        fi
+        echo "wrk2 failed for mode=$mode governor=$governor rate=$rate. See $wrk_output" >&2
+        exit 1
+      }
+    eval "$(python3 "$METRICS_SCRIPT" --input "$wrk_output" --format shell)"
+    req_per_sec=${requests_sec:-NA}
+    latency_avg_ms=${latency_avg_ms:-NA}
+    latency_stdev_ms=${latency_stdev_ms:-NA}
+    latency_max_ms=${latency_max_ms:-NA}
+    p50_ms=${p50_ms:-NA}
+    p90_ms=${p90_ms:-NA}
+    p95_ms=${p95_ms:-NA}
+    p99_ms=${p99_ms:-NA}
+  else
+    sleep "${EFFECTIVE_DURATION_SECONDS}"
+    wrk_output="NA"
+  fi
 
-  HOTEL_RESERVATION_TARGET="$TARGET" \
-    "$WRK_BIN" -D exp -t "$THREADS" -c "$CONNECTIONS" -d "${EFFECTIVE_DURATION_SECONDS}s" -L \
-    -s "$LUA_SCRIPT" "$HOST" -R "$rate" >"$wrk_output" 2>&1 || {
-      kill "$powerstat_pid" >/dev/null 2>&1 || true
-      wait "$powerstat_pid" >/dev/null 2>&1 || true
-      echo "wrk2 failed for governor=$governor rate=$rate. See $wrk_output" >&2
-      exit 1
-    }
+  if [[ -n "$powerstat_pid" ]]; then
+    wait "$powerstat_pid"
+    avg_power=$(extract_avg_power "$power_output")
+  else
+    power_output="NA"
+  fi
 
-  wait "$powerstat_pid"
-
-  local avg_power
-  local req_per_sec
-  avg_power=$(extract_avg_power "$power_output")
-  req_per_sec=$(extract_requests_per_sec "$wrk_output")
-
-  printf "%s,%s,%s,%s,%s,%s,%s\n" \
-    "$TARGET" "$governor" "$rate" "$req_per_sec" "$avg_power" "$wrk_output" "$power_output" >>"$RESULTS_CSV"
+  printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" \
+    "$TARGET" "$governor" "$rate" "$req_per_sec" "$avg_power" "${latency_avg_ms:-NA}" \
+    "${latency_stdev_ms:-NA}" "${latency_max_ms:-NA}" "${p50_ms:-NA}" "${p90_ms:-NA}" \
+    "${p95_ms:-NA}" "${p99_ms:-NA}" "$wrk_output" "$power_output" >>"$RESULTS_CSV"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --target)
       TARGET=$2
+      shift 2
+      ;;
+    --mode)
+      MODE=$2
       shift 2
       ;;
     --host)
@@ -368,91 +406,121 @@ case "$TARGET" in
     ;;
 esac
 
-case "$GOVERNOR" in
-  schedutil|performance) ;;
-  "")
-    echo "--governor is required" >&2
-    usage >&2
-    exit 1
-    ;;
+case "$MODE" in
+  combined|client|server-power) ;;
   *)
-    echo "Unsupported governor: $GOVERNOR" >&2
+    echo "Unsupported mode: $MODE" >&2
     exit 1
     ;;
 esac
 
+if [[ "$MODE" == "combined" || "$MODE" == "server-power" ]]; then
+  case "$GOVERNOR" in
+    schedutil|performance) ;;
+    "")
+      echo "--governor is required for mode=$MODE" >&2
+      usage >&2
+      exit 1
+      ;;
+    *)
+      echo "Unsupported governor: $GOVERNOR" >&2
+      exit 1
+      ;;
+  esac
+else
+  GOVERNOR="client"
+fi
+
 require_cmd python3
-require_cmd sudo
-require_cmd powerstat
 
-if [[ ! -x "$WRK_BIN" ]]; then
-  echo "wrk2 binary not found or not executable: $WRK_BIN" >&2
-  exit 1
+if [[ "$MODE" == "combined" || "$MODE" == "client" ]]; then
+  if [[ ! -x "$WRK_BIN" ]]; then
+    echo "wrk2 binary not found or not executable: $WRK_BIN" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "$LUA_SCRIPT" ]]; then
+    echo "Lua workload script not found: $LUA_SCRIPT" >&2
+    exit 1
+  fi
 fi
 
-if [[ ! -f "$LUA_SCRIPT" ]]; then
-  echo "Lua workload script not found: $LUA_SCRIPT" >&2
-  exit 1
-fi
-
-if [[ ! -f "$PLOT_SCRIPT" ]]; then
+if [[ "$MODE" == "combined" && ! -f "$PLOT_SCRIPT" ]]; then
   echo "Plot script not found: $PLOT_SCRIPT" >&2
   exit 1
 fi
 
-if ! compgen -G "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor" >/dev/null; then
-  echo "No CPU governor controls found under /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor" >&2
-  exit 1
+if [[ "$MODE" == "combined" || "$MODE" == "server-power" ]]; then
+  require_cmd sudo
+  require_cmd powerstat
+  if ! compgen -G "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor" >/dev/null; then
+    echo "No CPU governor controls found under /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor" >&2
+    exit 1
+  fi
+  sudo -v
 fi
 
-if ! require_python_module matplotlib; then
-  echo "Missing required Python module: matplotlib" >&2
-  echo "Install it before running the sweep, for example: python3 -m pip install matplotlib" >&2
-  exit 1
+if [[ "$MODE" == "combined" ]]; then
+  if ! require_python_module matplotlib; then
+    echo "Missing required Python module: matplotlib" >&2
+    echo "Install it before running the sweep, for example: python3 -m pip install matplotlib" >&2
+    exit 1
+  fi
 fi
-
-sudo -v
 
 if [[ -z "$OUTPUT_DIR" ]]; then
-  OUTPUT_DIR="$HOTEL_ROOT/results/power_sweeps/$(date -u +%Y%m%dT%H%M%SZ)_${TARGET}"
+  OUTPUT_DIR="$HOTEL_ROOT/results/power_sweeps/$(date -u +%Y%m%dT%H%M%SZ)_${TARGET}_${MODE}"
 fi
 
 mkdir -p "$OUTPUT_DIR/logs"
-mkdir -p "$OUTPUT_DIR/.matplotlib"
 CPU_STATE_DIR="$OUTPUT_DIR/cpu_state"
-mkdir -p "$CPU_STATE_DIR"
 RESULTS_CSV="$OUTPUT_DIR/results.csv"
 PLOT_PATH="$OUTPUT_DIR/arrival_rate_vs_power.png"
 RESTORE_STATE_FILE="$CPU_STATE_DIR/original_state.txt"
 
-printf "target,governor,arrival_rate_rps,requests_sec,avg_power_watts,wrk_output,powerstat_output\n" >"$RESULTS_CSV"
+printf "target,governor,arrival_rate_rps,requests_sec,avg_power_watts,latency_avg_ms,latency_stdev_ms,latency_max_ms,p50_ms,p90_ms,p95_ms,p99_ms,wrk_output,powerstat_output\n" >"$RESULTS_CSV"
 
 RATES=$(expand_rates "$RATES_SPEC")
-SOURCE=$(detect_powerstat_source)
-COUNT=$(calc_powerstat_count "$DURATION_SECONDS" "$POWERSTAT_INTERVAL")
-MIN_COUNT=$(powerstat_min_count "$SOURCE")
-if (( COUNT < MIN_COUNT )); then
-  COUNT=$MIN_COUNT
-fi
-EFFECTIVE_DURATION_SECONDS=$(duration_for_count "$COUNT" "$POWERSTAT_INTERVAL")
-if [[ "$EFFECTIVE_DURATION_SECONDS" != "$DURATION_SECONDS" ]]; then
-  echo "Extending run duration from ${DURATION_SECONDS}s to ${EFFECTIVE_DURATION_SECONDS}s to satisfy powerstat sample requirements."
-fi
+CLIENT_DURATION_SECONDS="$DURATION_SECONDS"
+SOURCE="none"
+COUNT=0
+EFFECTIVE_DURATION_SECONDS="$DURATION_SECONDS"
 
-capture_restore_state "$RESTORE_STATE_FILE"
-trap 'restore_cpu_state "$RESTORE_STATE_FILE"' EXIT
+if [[ "$MODE" == "combined" || "$MODE" == "server-power" ]]; then
+  mkdir -p "$CPU_STATE_DIR"
+  SOURCE=$(detect_powerstat_source)
+  COUNT=$(calc_powerstat_count "$DURATION_SECONDS" "$POWERSTAT_INTERVAL")
+  MIN_COUNT=$(powerstat_min_count "$SOURCE")
+  if (( COUNT < MIN_COUNT )); then
+    COUNT=$MIN_COUNT
+  fi
+  EFFECTIVE_DURATION_SECONDS=$(duration_for_count "$COUNT" "$POWERSTAT_INTERVAL")
+  if [[ "$EFFECTIVE_DURATION_SECONDS" != "$DURATION_SECONDS" ]]; then
+    echo "Extending power collection duration from ${DURATION_SECONDS}s to ${EFFECTIVE_DURATION_SECONDS}s to satisfy powerstat sample requirements."
+  fi
+  capture_restore_state "$RESTORE_STATE_FILE"
+  trap 'restore_cpu_state "$RESTORE_STATE_FILE"' EXIT
+fi
 
 IFS=, read -r -a rate_list <<<"$RATES"
 
-capture_cpu_state "$CPU_STATE_DIR/before_${GOVERNOR}.log"
-configure_frequency "$GOVERNOR"
-capture_cpu_state "$CPU_STATE_DIR/after_${GOVERNOR}.log"
-sleep "$SETTLE_SECONDS"
+if [[ "$MODE" == "combined" || "$MODE" == "server-power" ]]; then
+  capture_cpu_state "$CPU_STATE_DIR/before_${GOVERNOR}.log"
+  configure_frequency "$GOVERNOR"
+  capture_cpu_state "$CPU_STATE_DIR/after_${GOVERNOR}.log"
+  sleep "$SETTLE_SECONDS"
+fi
+
 for rate in "${rate_list[@]}"; do
-  run_single_point "$GOVERNOR" "$rate" "$SOURCE" "$COUNT"
+  run_single_point "$MODE" "$GOVERNOR" "$rate" "$SOURCE" "$COUNT"
 done
 
-MPLCONFIGDIR="$OUTPUT_DIR/.matplotlib" python3 "$PLOT_SCRIPT" --input "$RESULTS_CSV" --output "$PLOT_PATH"
+if [[ "$MODE" == "combined" ]]; then
+  mkdir -p "$OUTPUT_DIR/.matplotlib"
+  MPLCONFIGDIR="$OUTPUT_DIR/.matplotlib" python3 "$PLOT_SCRIPT" --input "$RESULTS_CSV" --output "$PLOT_PATH"
+fi
 
 echo "Results CSV: $RESULTS_CSV"
-echo "Plot: $PLOT_PATH"
+if [[ "$MODE" == "combined" ]]; then
+  echo "Plot: $PLOT_PATH"
+fi
