@@ -29,7 +29,7 @@ echo "MongoDB started on port 27017"
 
 # Start 4 Memcached instances (profile, review, rate, reserve)
 echo "Starting Memcached instances..."
-taskset -c 0 memcached -t 1 -m 128 -p 11211 -u nobody
+taskset -c 0 memcached -t 1 -m 128 -p 11214 -u nobody
 # memcached -p 11211 -m 128 -t 2 -d -P /tmp/hotel-memc-11211.pid
 # memcached -p 11212 -m 128 -t 2 -d -P /tmp/hotel-memc-11212.pid
 # memcached -p 11213 -m 128 -t 2 -d -P /tmp/hotel-memc-11213.pid
