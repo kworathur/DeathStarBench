@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"os"
 	"strconv"
-	"strings"
 
 	"github.com/delimitrou/DeathStarBench/tree/master/hotelReservation/dialer"
 	"github.com/delimitrou/DeathStarBench/tree/master/hotelReservation/registry"
@@ -63,13 +61,12 @@ func (s *Server) Run() error {
 	}
 
 	log.Info().Msg("Initializing gRPC clients...")
-	if !reservationOnlyModeEnabled() {
-		if err := s.initSearchClient("srv-search"); err != nil {
-			return err
-		}
-		if err := s.initProfileClient("srv-profile"); err != nil {
-			return err
-		}
+	if err := s.initSearchClient("srv-search"); err != nil {
+		return err
+	}
+
+	if err := s.initProfileClient("srv-profile"); err != nil {
+		return err
 	}
 
 	if err := s.initRecommendationClient("srv-recommendation"); err != nil {
@@ -240,24 +237,22 @@ func (s *Server) searchHandler(w http.ResponseWriter, r *http.Request) {
 	log.Trace().Msg("starts searchHandler querying downstream")
 
 	log.Trace().Msgf("SEARCH [lat: %v, lon: %v, inDate: %v, outDate: %v", lat, lon, inDate, outDate)
-	hotelIDs := reservationOnlyHotelIDs()
-	if hotelIDs == nil {
-		// search for best hotels
-		searchResp, err := s.searchClient.Nearby(ctx, &search.NearbyRequest{
-			Lat:     lat,
-			Lon:     lon,
-			InDate:  inDate,
-			OutDate: outDate,
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		log.Trace().Msg("SearchHandler gets searchResp")
-		hotelIDs = searchResp.HotelIds
-	} else {
-		log.Info().Msg("SearchHandler running reservation-only /hotels mode")
+	// search for best hotels
+	searchResp, err := s.searchClient.Nearby(ctx, &search.NearbyRequest{
+		Lat:     lat,
+		Lon:     lon,
+		InDate:  inDate,
+		OutDate: outDate,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+
+	log.Trace().Msg("SearchHandler gets searchResp")
+	//for _, hid := range searchResp.HotelIds {
+	//	log.Trace().Msgf("Search Handler hotelId = %s", hid)
+	//}
 
 	// grab locale from query params or default to en
 	locale := r.URL.Query().Get("locale")
@@ -267,7 +262,7 @@ func (s *Server) searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	reservationResp, err := s.reservationClient.CheckAvailability(ctx, &reservation.Request{
 		CustomerName: "",
-		HotelId:      hotelIDs,
+		HotelId:      searchResp.HotelIds,
 		InDate:       inDate,
 		OutDate:      outDate,
 		RoomNumber:   1,
@@ -280,13 +275,6 @@ func (s *Server) searchHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Trace().Msgf("searchHandler gets reserveResp")
 	log.Trace().Msgf("searchHandler gets reserveResp.HotelId = %s", reservationResp.HotelId)
-	if reservationOnlyModeEnabled() {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"hotelIds": reservationResp.HotelId,
-			"count":    len(reservationResp.HotelId),
-		})
-		return
-	}
 
 	// hotel profiles
 	profileResp, err := s.profileClient.GetProfiles(ctx, &profile.Request{
@@ -698,34 +686,6 @@ func geoJSONResponse(hs []*profile.Hotel) map[string]interface{} {
 		"type":     "FeatureCollection",
 		"features": fs,
 	}
-}
-
-func reservationOnlyHotelIDs() []string {
-	if !reservationOnlyModeEnabled() {
-		return nil
-	}
-	if raw := strings.TrimSpace(os.Getenv("HOTEL_FRONTEND_RESERVATION_ONLY_HOTEL_IDS")); raw != "" {
-		parts := strings.Split(raw, ",")
-		ids := make([]string, 0, len(parts))
-		for _, part := range parts {
-			id := strings.TrimSpace(part)
-			if id != "" {
-				ids = append(ids, id)
-			}
-		}
-		if len(ids) > 0 {
-			return ids
-		}
-	}
-	ids := make([]string, 0, 80)
-	for i := 1; i <= 80; i++ {
-		ids = append(ids, strconv.Itoa(i))
-	}
-	return ids
-}
-
-func reservationOnlyModeEnabled() bool {
-	return os.Getenv("HOTEL_FRONTEND_RESERVATION_ONLY") == "1"
 }
 
 func checkDataFormat(date string) bool {
