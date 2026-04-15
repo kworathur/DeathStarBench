@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import pdb
+
 import argparse
 import csv
 import os
@@ -459,7 +459,6 @@ def main() -> int:
                     )
                     + "\n",
                 )
-                # breakpoint()
                 with ThreadPoolExecutor(max_workers=2) as pair_executor:
                     server_future = pair_executor.submit(
                         run_job,

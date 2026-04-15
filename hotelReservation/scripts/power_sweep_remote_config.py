@@ -16,7 +16,7 @@ SSH_KEY_PATH = os.path.expanduser(os.environ.get("HOTEL_REMOTE_SSH_KEY", ""))
 
 # Optional deploy key copied to each node so it can clone/pull this repository.
 PRIVATE_KEY_PATH = os.path.expanduser(os.environ.get("HOTEL_REMOTE_GIT_KEY", ""))
-REMOTE_KEY_PATH = os.environ.get("HOTEL_REMOTE_GIT_KEY_DEST", "~/.ssh/cloudlab_git")
+REMOTE_KEY_PATH = os.environ.get("HOTEL_REMOTE_GIT_KEY_DEST", "~/.ssh/deathstarbench_deploy_key")
 
 # Repository and artifact layout on the remote hosts.
 REPO_ROOT = Path(__file__).resolve().parents[2]

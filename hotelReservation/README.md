@@ -165,9 +165,7 @@ Read the Readme file in Openshift directory.
 Read the Readme file in Kubernetes directory.
 
 #### workload generation
-Experiments are run on pairs of machines, with one machine acting as the client, issuing HTTP requests to another machine, which acts as the server.
-
-
+Experiments are run on pairs of machines, with one machine acting as the client with generates load, while the other machine services HTTP requests
 The distributed entrypoint is now a Python orchestrator, aligned with the remote setup flow used in `envoy-imbalancer-exp`:
 
 - `scripts/power_sweep_remote_config.py` holds reusable node/auth defaults
@@ -175,10 +173,6 @@ The distributed entrypoint is now a Python orchestrator, aligned with the remote
 - `scripts/run_distributed_power_sweeps.py` bootstraps remote checkouts and runs governor phases in parallel
 
 Use `--refresh-repo` to `git fetch` and `git pull --ff-only` on existing remote checkouts before starting a new sweep.
-
-```bash
-watch -tdn0.5 ps -mo pid,tid,%cpu,psr -p \`pgrep mongod\`
-```
 
 ### Questions and contact
 
