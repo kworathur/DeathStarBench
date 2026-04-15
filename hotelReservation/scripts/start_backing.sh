@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 LOG_DIR="/tmp/hotel-logs"
 mkdir -p "$LOG_DIR"
@@ -23,18 +23,34 @@ echo "Consul started (PID: $CONSUL_PID)"
 
 # Start MongoDB (single instance, all services use different databases)
 echo "Starting MongoDB..."
-mkdir -p /tmp/hotel-mongo
-taskset -c 1 mongod   --dbpath /tmp/mongo-hotel   --bind_ip 127.0.0.1   --wiredTigerCacheSizeGB 0.5   --setParameter wiredTigerConcurrentReadTransactions=5   --setParameter wiredTigerConcurrentWriteTransactions=5   --logpath /tmp/mongod.log --fork
-echo "MongoDB started on port 27017"
+MONGO_CPU=1
+MEMCACHED_CPUS=0,2-31
+MEMCACHED_PORT=11214
+MONGO_DBPATH=/tmp/mongo-hotel
+mkdir -p "$MONGO_DBPATH"
+taskset -c "$MONGO_CPU" mongod \
+  --dbpath "$MONGO_DBPATH" \
+  --bind_ip 127.0.0.1 \
+  --wiredTigerCacheSizeGB 0.5 \
+  --setParameter wiredTigerConcurrentReadTransactions=5 \
+  --setParameter wiredTigerConcurrentWriteTransactions=5 \
+  --logpath /tmp/mongod.log \
+  --fork
+MONGOD_PID=$(pgrep -xo mongod)
+taskset -a -pc "$MONGO_CPU" "$MONGOD_PID" >/dev/null
+echo "$MONGOD_PID" > /tmp/hotel-mongod.pid
+echo "MongoDB started on port 27017 (PID: $MONGOD_PID, CPU: $MONGO_CPU)"
 
-# Start 4 Memcached instances (profile, review, rate, reserve)
-echo "Starting Memcached instances..."
-taskset -c 0 memcached -t 1 -m 128 -p 11214 -u nobody
-# memcached -p 11211 -m 128 -t 2 -d -P /tmp/hotel-memc-11211.pid
-# memcached -p 11212 -m 128 -t 2 -d -P /tmp/hotel-memc-11212.pid
-# memcached -p 11213 -m 128 -t 2 -d -P /tmp/hotel-memc-11213.pid
-# memcached -p 11214 -m 128 -t 2 -d -P /tmp/hotel-memc-11214.pid
-echo "Memcached started on ports 11211-11214"
+# Start only the reservation memcached instance on CPUs not used by MongoDB.
+echo "Starting reservation Memcached instance..."
+taskset -c "$MEMCACHED_CPUS" memcached \
+  -t 1 \
+  -m 128 \
+  -p "$MEMCACHED_PORT" \
+  -u nobody \
+  -d \
+  -P "/tmp/hotel-memc-${MEMCACHED_PORT}.pid"
+echo "Memcached started on port $MEMCACHED_PORT (CPUs: $MEMCACHED_CPUS)"
 
 # Start Jaeger
 echo "Starting Jaeger..."
@@ -48,7 +64,7 @@ echo "All backing services started."
 echo "  Consul UI:  http://localhost:8500"
 echo "  Jaeger UI:  http://localhost:16686"
 echo "  MongoDB:    localhost:27017"
-echo "  Memcached:  localhost:11211-11214"
+echo "  Memcached:  localhost:$MEMCACHED_PORT"
 echo ""
 echo "Logs:"
 echo "  Consul:     $LOG_DIR/consul.log"
