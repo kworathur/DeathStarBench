@@ -5,6 +5,7 @@ import argparse
 import csv
 import os
 import shlex
+import stat
 import subprocess
 import sys
 import time
@@ -22,7 +23,6 @@ from power_sweep_remote_util import (
     expand_remote_path,
     expand_template,
     git_host_from_url,
-    run_local_command,
     run_remote_command,
     split_csv,
     split_node,
@@ -94,6 +94,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--paired-start-delay", type=float, default=1.0, help="Delay after starting server power collection before starting the client load.")
     parser.add_argument("--skip-copy-back", action="store_true", help="Leave results only on remote hosts.")
     parser.add_argument("--refresh-repo", action="store_true", help="Run git fetch/pull on existing remote checkouts.")
+    parser.add_argument("--server-stop-first", action="store_true", help="Stop any existing hotelReservation processes on server hosts before starting a new stack.")
+    parser.add_argument("--server-build", action="store_true", help="Build hotelReservation server binaries on server hosts after checkout.")
+    parser.add_argument("--server-start-backing", action="store_true", help="Start backing services on server hosts before running sweeps.")
+    parser.add_argument("--server-start-services", action="store_true", help="Start hotelReservation services on server hosts before running sweeps.")
+    parser.add_argument("--server-startup-wait", type=int, default=5, help="Seconds to wait after starting the server stack before running sweeps.")
+    parser.add_argument("--client-build-wrk", action="store_true", help="Build wrk2 on client hosts after checkout.")
     parser.add_argument(
         "--bootstrap-only",
         action="store_true",
@@ -104,6 +110,15 @@ def parse_args() -> argparse.Namespace:
 
 def load_explicit_hosts(raw: str | None) -> list[str]:
     return split_csv(raw or "")
+
+
+def shell_path_expr(path: str) -> str:
+    expanded = expand_remote_path(path)
+    if expanded == "~":
+        return '"$HOME"'
+    if expanded.startswith("~/"):
+        return f'"$HOME/{expanded[2:]}"'
+    return shlex.quote(expanded)
 
 
 def ensure_remote_checkout(
@@ -122,13 +137,9 @@ def ensure_remote_checkout(
         git_host = git_host_from_url(clone_repo_url)
         remote_repo_root = expand_remote_path(remote_repo_root)
         remote_key_path = expand_remote_path(remote_key_path)
-        if remote_repo_root.startswith("~/"):
-            remote_repo_root = f"$HOME/{remote_repo_root[2:]}"
-        if remote_key_path.startswith("~/"):
-            remote_key_path = f"$HOME/{remote_key_path[2:]}"
-        remote_parent = str(Path(remote_repo_root).parent)
-
-        run_remote_command(conn, f"mkdir -p {shlex.quote(remote_parent)}", must_succeed=True)
+        ssh_identity_path = remote_key_path
+        remote_repo_root_expr = shell_path_expr(remote_repo_root)
+        remote_key_path_expr = shell_path_expr(remote_key_path)
 
         if private_key:
             sftp = conn.open_sftp()
@@ -140,9 +151,12 @@ def ensure_remote_checkout(
 
             bootstrap_cmd = f"""
 set -euo pipefail
-mkdir -p "$(dirname {shlex.quote(remote_key_path)})"
-chmod 700 "$(dirname {shlex.quote(remote_key_path)})"
-install -m 600 {shlex.quote(remote_tmp_key)} {shlex.quote(remote_key_path)}
+REMOTE_REPO_ROOT={remote_repo_root_expr}
+REMOTE_KEY_PATH={remote_key_path_expr}
+mkdir -p "$(dirname "$REMOTE_REPO_ROOT")"
+mkdir -p "$(dirname "$REMOTE_KEY_PATH")"
+chmod 700 "$(dirname "$REMOTE_KEY_PATH")"
+install -m 600 {shlex.quote(remote_tmp_key)} "$REMOTE_KEY_PATH"
 rm -f {shlex.quote(remote_tmp_key)}
 mkdir -p "$HOME/.ssh"
 touch "$HOME/.ssh/known_hosts"
@@ -156,7 +170,7 @@ ssh-keyscan -H {shlex.quote(git_host)} >> "$HOME/.ssh/known_hosts" 2>/dev/null |
 python3 - <<'PY'
 from pathlib import Path
 host = {git_host!r}
-identity = {remote_key_path!r}
+identity = {ssh_identity_path!r}
 config_path = Path.home() / ".ssh" / "config"
 lines = config_path.read_text(encoding="utf-8").splitlines() if config_path.exists() else []
 filtered = []
@@ -181,22 +195,144 @@ PY
 """
             run_remote_command(conn, f"bash -lc {shlex.quote(bootstrap_cmd)}", must_succeed=True)
 
+        checkout_target = "origin/HEAD"
         clone_cmd = f"""
 set -euo pipefail
-if [ ! -d {shlex.quote(remote_repo_root)}/.git ]; then
-  git clone --recurse-submodules {shlex.quote(clone_repo_url)} {shlex.quote(remote_repo_root)}
-  cd {shlex.quote(remote_repo_root)}
-  git submodule update --init --recursive
-elif [ "{'1' if refresh_repo else '0'}" = "1" ]; then
-  cd {shlex.quote(remote_repo_root)}
-  git fetch origin
-  branch="$(git rev-parse --abbrev-ref HEAD)"
-  git pull --ff-only origin "$branch"
-  git submodule sync --recursive
-  git submodule update --init --recursive
+REMOTE_REPO_ROOT={remote_repo_root_expr}
+mkdir -p "$(dirname "$REMOTE_REPO_ROOT")"
+if [ ! -d "$REMOTE_REPO_ROOT/.git" ]; then
+  git clone --recurse-submodules {shlex.quote(clone_repo_url)} "$REMOTE_REPO_ROOT"
 fi
+cd "$REMOTE_REPO_ROOT"
+git fetch --prune origin
+git checkout --detach {checkout_target}
+if [ "{'1' if refresh_repo else '0'}" = "1" ]; then
+  git submodule sync --recursive
+fi
+git submodule update --init --recursive
 """
         run_remote_command(conn, f"bash -lc {shlex.quote(clone_cmd)}", must_succeed=True)
+        return host
+    finally:
+        conn.close()
+
+
+def prepare_server_stack(
+    node: str,
+    ssh_user: str,
+    ssh_key: str | None,
+    remote_repo_root: str,
+    args: argparse.Namespace,
+) -> str:
+    if not (
+        args.server_stop_first
+        or args.server_build
+        or args.server_start_backing
+        or args.server_start_services
+    ):
+        return split_node(node, ssh_user)[1]
+
+    default_user, host = split_node(node, ssh_user)
+    conn = connect(host, default_user, ssh_key)
+    try:
+        remote_repo_root = expand_remote_path(remote_repo_root)
+        if remote_repo_root.startswith("~/"):
+            remote_repo_root = f"$HOME/{remote_repo_root[2:]}"
+
+        service_build_cmd = """
+(
+cd hotelReservation
+mkdir -p bin
+for svc in frontend search geo rate profile recommendation user reservation review attractions; do
+  go build -o "bin/$svc" "./cmd/$svc"
+done
+)
+"""
+        start_backing_cmd = """
+LOG_DIR="/tmp/hotel-logs"
+mkdir -p "$LOG_DIR"
+
+port_open() {
+  python3 - "$1" <<'PY'
+import socket
+import sys
+s = socket.socket()
+s.settimeout(1.0)
+sys.exit(0 if s.connect_ex(("127.0.0.1", int(sys.argv[1]))) == 0 else 1)
+PY
+}
+
+if ! port_open 8500; then
+  nohup consul agent -dev -client=0.0.0.0 > "$LOG_DIR/consul.log" 2>&1 < /dev/null &
+  CONSUL_PID=$!
+  echo "$CONSUL_PID" > /tmp/hotel-consul.pid
+  sleep 2
+fi
+curl -s http://localhost:8500/v1/status/leader > /dev/null
+
+if ! port_open 27017; then
+  rm -rf /tmp/hotel-mongo
+  mkdir -p /tmp/hotel-mongo
+  mongod --dbpath /tmp/hotel-mongo --port 27017 --bind_ip 0.0.0.0 --fork --logpath "$LOG_DIR/mongod.log" || {
+    cat "$LOG_DIR/mongod.log" || true
+    exit 1
+  }
+fi
+
+if ! port_open 11211; then memcached -p 11211 -m 128 -t 2 -d -P /tmp/hotel-memc-11211.pid; fi
+if ! port_open 11212; then memcached -p 11212 -m 128 -t 2 -d -P /tmp/hotel-memc-11212.pid; fi
+if ! port_open 11213; then memcached -p 11213 -m 128 -t 2 -d -P /tmp/hotel-memc-11213.pid; fi
+if ! port_open 11214; then memcached -p 11214 -m 128 -t 2 -d -P /tmp/hotel-memc-11214.pid; fi
+
+if ! port_open 6831; then
+  nohup jaeger > "$LOG_DIR/jaeger.log" 2>&1 < /dev/null &
+  JAEGER_PID=$!
+  echo "$JAEGER_PID" > /tmp/hotel-jaeger.pid
+fi
+"""
+
+        steps: list[str] = ["set -euo pipefail", f"cd {shlex.quote(remote_repo_root)}"]
+        if args.server_stop_first:
+            steps.append("bash hotelReservation/scripts/stop_all.sh || true")
+        if args.server_build:
+            steps.append(service_build_cmd.strip())
+        if args.server_start_backing:
+            steps.append(start_backing_cmd.strip())
+        if args.server_start_services:
+            steps.append("bash hotelReservation/scripts/start_services.sh")
+        if args.server_start_backing or args.server_start_services:
+            steps.append(f"sleep {int(args.server_startup_wait)}")
+
+        prep_cmd = "\n".join(steps) + "\n"
+        run_remote_command(conn, f"bash -lc {shlex.quote(prep_cmd)}", must_succeed=True)
+        return host
+    finally:
+        conn.close()
+
+
+def prepare_client_loadgen(
+    node: str,
+    ssh_user: str,
+    ssh_key: str | None,
+    remote_repo_root: str,
+    args: argparse.Namespace,
+) -> str:
+    if not args.client_build_wrk:
+        return split_node(node, ssh_user)[1]
+
+    default_user, host = split_node(node, ssh_user)
+    conn = connect(host, default_user, ssh_key)
+    try:
+        remote_repo_root = expand_remote_path(remote_repo_root)
+        if remote_repo_root.startswith("~/"):
+            remote_repo_root = f"$HOME/{remote_repo_root[2:]}"
+
+        prep_cmd = f"""
+set -euo pipefail
+cd {shlex.quote(remote_repo_root)}
+make -C wrk2
+"""
+        run_remote_command(conn, f"bash -lc {shlex.quote(prep_cmd)}", must_succeed=True)
         return host
     finally:
         conn.close()
@@ -210,14 +346,28 @@ def copy_results(
     local_dir: Path,
 ) -> None:
     default_user, host = split_node(node, ssh_user)
-    remote = f"{default_user}@{host}" if default_user else host
-    local_dir.mkdir(parents=True, exist_ok=True)
+    conn = connect(host, default_user, ssh_key)
+    try:
+        sftp = conn.open_sftp()
+        try:
+            local_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = ["scp", "-r", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"]
-    if ssh_key:
-        cmd.extend(["-i", os.path.expanduser(ssh_key)])
-    cmd.extend([f"{remote}:{remote_dir}/.", str(local_dir)])
-    run_local_command(cmd, must_succeed=False)
+            def copy_tree(remote_path: str, local_path: Path) -> None:
+                for entry in sftp.listdir_attr(remote_path):
+                    remote_entry = f"{remote_path.rstrip('/')}/{entry.filename}"
+                    local_entry = local_path / entry.filename
+                    if stat.S_ISDIR(entry.st_mode):
+                        local_entry.mkdir(parents=True, exist_ok=True)
+                        copy_tree(remote_entry, local_entry)
+                    else:
+                        local_entry.parent.mkdir(parents=True, exist_ok=True)
+                        sftp.get(remote_entry, str(local_entry))
+
+            copy_tree(remote_dir, local_dir)
+        finally:
+            sftp.close()
+    finally:
+        conn.close()
 
 
 def run_job(
@@ -390,6 +540,12 @@ def main() -> int:
             f"powerstat_source={args.powerstat_source}",
             f"settle_seconds={args.settle_seconds}",
             f"refresh_repo={int(args.refresh_repo)}",
+            f"server_stop_first={int(args.server_stop_first)}",
+            f"server_build={int(args.server_build)}",
+            f"server_start_backing={int(args.server_start_backing)}",
+            f"server_start_services={int(args.server_start_services)}",
+            f"server_startup_wait={args.server_startup_wait}",
+            f"client_build_wrk={int(args.client_build_wrk)}",
             f"copy_results={int(not args.skip_copy_back)}",
         ]
     )
@@ -428,8 +584,68 @@ def main() -> int:
         return 0
 
     if paired_mode:
+        if args.client_build_wrk:
+            unique_client_nodes: list[str] = []
+            for node in client_hosts[: len(targets)]:
+                if node not in unique_client_nodes:
+                    unique_client_nodes.append(node)
+
+            client_prepare_dir = local_output_dir / "client_prepare"
+            client_prepare_dir.mkdir(parents=True, exist_ok=True)
+            with ThreadPoolExecutor(max_workers=max(1, len(unique_client_nodes))) as executor:
+                futures = {
+                    executor.submit(
+                        prepare_client_loadgen,
+                        node=node,
+                        ssh_user=args.ssh_user,
+                        ssh_key=args.ssh_key or None,
+                        remote_repo_root=args.remote_repo_root,
+                        args=args,
+                    ): node
+                    for node in unique_client_nodes
+                }
+                for future in as_completed(futures):
+                    node = futures[future]
+                    log_path = client_prepare_dir / node.replace("@", "_")
+                    try:
+                        host = future.result()
+                        write_text(log_path / "status.log", f"prepared={host}\n")
+                    except Exception as exc:
+                        write_text(log_path / "status.log", f"error={exc}\n")
+                        raise
+
+        if args.server_stop_first or args.server_build or args.server_start_backing or args.server_start_services:
+            unique_server_nodes: list[str] = []
+            for node in server_hosts[: len(targets)]:
+                if node not in unique_server_nodes:
+                    unique_server_nodes.append(node)
+
+            server_prepare_dir = local_output_dir / "server_prepare"
+            server_prepare_dir.mkdir(parents=True, exist_ok=True)
+            with ThreadPoolExecutor(max_workers=max(1, len(unique_server_nodes))) as executor:
+                futures = {
+                    executor.submit(
+                        prepare_server_stack,
+                        node=node,
+                        ssh_user=args.ssh_user,
+                        ssh_key=args.ssh_key or None,
+                        remote_repo_root=args.remote_repo_root,
+                        args=args,
+                    ): node
+                    for node in unique_server_nodes
+                }
+                for future in as_completed(futures):
+                    node = futures[future]
+                    log_path = server_prepare_dir / node.replace("@", "_")
+                    try:
+                        host = future.result()
+                        write_text(log_path / "status.log", f"prepared={host}\n")
+                    except Exception as exc:
+                        write_text(log_path / "status.log", f"error={exc}\n")
+                        raise
+
         overall_status = 0
-        plot_script = cfg.REPO_ROOT / "scripts" / "plot_power_sweep.py"
+        plot_script = cfg.REPO_ROOT / "hotelReservation" / "scripts" / "plot_power_sweep.py"
         for governor in governors:
             phase_dir = local_output_dir / governor
             phase_dir.mkdir(parents=True, exist_ok=True)
@@ -511,10 +727,13 @@ def main() -> int:
                         local_job_dir / "merged",
                     )
                     power_plot = local_job_dir / "merged" / "arrival_rate_vs_power.png"
-                    subprocess.run(
-                        [sys.executable, str(plot_script), "--input", str(merged_csv), "--output", str(power_plot)],
-                        check=True,
-                    )
+                    try:
+                        subprocess.run(
+                            [sys.executable, str(plot_script), "--input", str(merged_csv), "--output", str(power_plot)],
+                            check=True,
+                        )
+                    except subprocess.CalledProcessError as exc:
+                        print(f"Skipping plot generation for {local_job_dir}: {exc}", file=sys.stderr)
                 write_text(local_job_dir / "status.log", "status=ok\n")
 
             if failures:
