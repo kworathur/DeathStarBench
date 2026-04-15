@@ -24,7 +24,7 @@ echo "Consul started (PID: $CONSUL_PID)"
 # Start MongoDB (single instance, all services use different databases)
 echo "Starting MongoDB..."
 mkdir -p /tmp/hotel-mongo
-mongod --dbpath /tmp/hotel-mongo --port 27017 --bind_ip 0.0.0.0 --fork --logpath "$LOG_DIR/mongod.log"
+taskset -c 1 mongod   --dbpath /tmp/mongo-hotel   --bind_ip 127.0.0.1   --wiredTigerCacheSizeGB 0.5   --setParameter wiredTigerConcurrentReadTransactions=5   --setParameter wiredTigerConcurrentWriteTransactions=5   --logpath /tmp/mongod.log --fork
 echo "MongoDB started on port 27017"
 
 # Start 4 Memcached instances (profile, review, rate, reserve)
