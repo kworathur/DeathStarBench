@@ -174,6 +174,23 @@ The distributed entrypoint is now a Python orchestrator, aligned with the remote
 
 Use `--refresh-repo` to `git fetch` and `git pull --ff-only` on existing remote checkouts before starting a new sweep.
 
+### Generate Report Figures
+1. Run install script
+
+```bash
+./hotelReservation/scripts/install.sh
+```
+
+2. Checkout code on remote machines
+```bash
+python run_distributed_power_sweeps.py --server-hosts 10.10.3.2 --client-hosts 10.10.3.1 --targets reservations --governors schedutil --ssh-key ~/.ssh/id_rsa --private-key ~/.ssh/cloudlab_git --clone-repo-url git@github.com:kworathur/DeathStarBench.git --remote-repo-root ~/DeathStarBench --bootstrap-only
+```
+
+3. Run the load generation experiments
+```bash
+python run_distributed_power_sweeps.py --server-hosts 10.10.3.2 --client-hosts 10.10.3.1 --targets hotels --governors schedutil --ssh-key ~/.ssh/id_rsa --private-key ~/.ssh/cloudlab_git --clone-repo-url git@github.com:kworathur/DeathStarBench.git --remote-repo-root ~/DeathStarBench --rates 100:500:100
+```
+
 ### Questions and contact
 
 You are welcome to submit a pull request if you find a bug or have extended the application in an interesting way. For any questions please contact us at: <microservices-bench-L@list.cornell.edu>

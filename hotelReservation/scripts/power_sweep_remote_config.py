@@ -12,11 +12,11 @@ DEFAULT_GOVERNORS = ["performance", "schedutil"]
 
 # SSH configuration for connecting to experiment nodes.
 SSH_USER = os.environ.get("HOTEL_REMOTE_SSH_USER", "")
-SSH_KEY_PATH = os.path.expanduser(os.environ.get("HOTEL_REMOTE_SSH_KEY", ""))
+SSH_KEY_PATH = os.path.expanduser(os.environ.get("HOTEL_REMOTE_SSH_KEY", "~/.ssh/id_rsa"))
 
 # Optional deploy key copied to each node so it can clone/pull this repository.
-PRIVATE_KEY_PATH = os.path.expanduser(os.environ.get("HOTEL_REMOTE_GIT_KEY", ""))
-REMOTE_KEY_PATH = os.environ.get("HOTEL_REMOTE_GIT_KEY_DEST", "~/.ssh/deathstarbench_deploy_key")
+PRIVATE_KEY_PATH = os.path.expanduser(os.environ.get("HOTEL_REMOTE_GIT_KEY", "~/.ssh/cloudlab_git"))
+REMOTE_KEY_PATH = os.environ.get("HOTEL_REMOTE_GIT_KEY_DEST", "~/.ssh/cloudlab_git")
 
 # Repository and artifact layout on the remote hosts.
 REPO_ROOT = Path(__file__).resolve().parents[2]
