@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import os
+import posixpath
 import shlex
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -123,6 +125,24 @@ def run_local_command(cmd: list[str], must_succeed: bool = True) -> subprocess.C
     if must_succeed and result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"local command failed: {shlex.join(cmd)}")
     return result
+
+
+def copy_remote_tree(conn, remote_dir: str, local_dir: Path) -> None:
+    sftp = conn.open_sftp()
+    try:
+        def copy_path(src: str, dst: Path) -> None:
+            attrs = sftp.stat(src)
+            if stat.S_ISDIR(attrs.st_mode):
+                dst.mkdir(parents=True, exist_ok=True)
+                for entry in sftp.listdir_attr(src):
+                    copy_path(posixpath.join(src, entry.filename), dst / entry.filename)
+                return
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            sftp.get(src, str(dst))
+
+        copy_path(remote_dir, local_dir)
+    finally:
+        sftp.close()
 
 
 def write_text(path: Path, content: str) -> None:

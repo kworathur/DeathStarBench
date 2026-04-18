@@ -33,21 +33,25 @@ def timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def load_hosts(args: argparse.Namespace) -> list[str]:
-    hosts: list[str] = []
-    if args.hosts_file:
-        file_path = Path(args.hosts_file)
+def load_hosts_from_args(
+    hosts: str | None,
+    hosts_file: str | None,
+    default_hosts: list[str] | tuple[str, ...] | None = None,
+) -> list[str]:
+    resolved_hosts: list[str] = []
+    if hosts_file:
+        file_path = Path(hosts_file)
         if not file_path.is_file():
             raise FileNotFoundError(f"hosts file not found: {file_path}")
         for line in file_path.read_text(encoding="utf-8").splitlines():
             value = trim(line)
             if value and not value.startswith("#"):
-                hosts.append(value)
-    if args.hosts:
-        hosts.extend(split_csv(args.hosts))
-    if not hosts:
-        hosts.extend(cfg.NODES)
-    return hosts
+                resolved_hosts.append(value)
+    if hosts:
+        resolved_hosts.extend(split_csv(hosts))
+    if not resolved_hosts and default_hosts:
+        resolved_hosts.extend(default_hosts)
+    return resolved_hosts
 
 
 def pick_targets(args: argparse.Namespace) -> list[str]:
@@ -66,8 +70,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Clone/update hotelReservation on remote nodes and run power sweeps in parallel.",
     )
-    parser.add_argument("--hosts", help="Comma-separated SSH hostnames.")
-    parser.add_argument("--hosts-file", help="File with one hostname per line.")
+    parser.add_argument("--hosts", help="Comma-separated SSH hostnames. Compatibility fallback for both client and server hosts.")
+    parser.add_argument("--hosts-file", help="File with one hostname per line. Compatibility fallback for both client and server hosts.")
+    parser.add_argument("--client-hosts", help="Comma-separated SSH hostnames for client nodes running wrk2 generation.")
+    parser.add_argument("--client-hosts-file", help="File with one client hostname per line.")
+    parser.add_argument("--server-hosts", help="Comma-separated host/IP values for servers handling requests.")
+    parser.add_argument("--server-hosts-file", help="File with one server host/IP per line.")
     parser.add_argument("--targets", default="all", help="Comma-separated targets or 'all'.")
     parser.add_argument("--governors", help="Comma-separated governors.")
     parser.add_argument("--ssh-user", default=cfg.SSH_USER, help="Optional SSH username.")
@@ -264,14 +272,26 @@ def run_job(
 
 def main() -> int:
     args = parse_args()
-    hosts = load_hosts(args)
+    compatibility_hosts = load_hosts_from_args(args.hosts, args.hosts_file, cfg.NODES)
+    client_hosts = load_hosts_from_args(args.client_hosts, args.client_hosts_file, compatibility_hosts)
+    server_hosts = load_hosts_from_args(args.server_hosts, args.server_hosts_file, compatibility_hosts)
     targets = pick_targets(args)
     governors = pick_governors(args)
 
-    if not hosts:
-        raise SystemExit("No hosts provided. Use --hosts, --hosts-file, or configure NODES in scripts/power_sweep_remote_config.py.")
-    if not args.bootstrap_only and len(hosts) < len(targets):
-        raise SystemExit(f"Need at least as many hosts as targets. hosts={len(hosts)} targets={len(targets)}")
+    if not client_hosts:
+        raise SystemExit(
+            "No client hosts provided. Use --client-hosts/--client-hosts-file, "
+            "--hosts/--hosts-file, or configure NODES in scripts/power_sweep_remote_config.py."
+        )
+    if not args.bootstrap_only and not server_hosts:
+        raise SystemExit(
+            "No server hosts provided. Use --server-hosts/--server-hosts-file, "
+            "--hosts/--hosts-file, or configure NODES in scripts/power_sweep_remote_config.py."
+        )
+    if not args.bootstrap_only and len(client_hosts) < len(targets):
+        raise SystemExit(f"Need at least as many client hosts as targets. client_hosts={len(client_hosts)} targets={len(targets)}")
+    if not args.bootstrap_only and len(server_hosts) < len(targets):
+        raise SystemExit(f"Need at least as many server hosts as targets. server_hosts={len(server_hosts)} targets={len(targets)}")
     if not args.clone_repo_url:
         raise SystemExit("Unable to determine clone URL. Pass --clone-repo-url explicitly or set it in power_sweep_remote_config.py.")
 
@@ -282,7 +302,8 @@ def main() -> int:
 
     run_env = "\n".join(
         [
-            f"hosts={' '.join(hosts)}",
+            f"client_hosts={' '.join(client_hosts)}",
+            f"server_hosts={' '.join(server_hosts)}",
             f"targets={' '.join(targets)}",
             f"governors={' '.join(governors)}",
             f"clone_repo_url={args.clone_repo_url}",
@@ -305,11 +326,12 @@ def main() -> int:
     bootstrap_dir = local_output_dir / "bootstrap"
     bootstrap_dir.mkdir(parents=True, exist_ok=True)
 
-    with ThreadPoolExecutor(max_workers=len(targets)) as executor:
+    bootstrap_count = len(client_hosts) if args.bootstrap_only else len(targets)
+    with ThreadPoolExecutor(max_workers=bootstrap_count) as executor:
         futures = {
             executor.submit(
                 ensure_remote_checkout,
-                node=hosts[index],
+                node=client_hosts[index],
                 ssh_user=args.ssh_user,
                 ssh_key=args.ssh_key or None,
                 private_key=args.private_key or None,
@@ -317,8 +339,8 @@ def main() -> int:
                 remote_repo_root=args.remote_repo_root,
                 remote_key_path=args.remote_key_path,
                 refresh_repo=args.refresh_repo,
-            ): hosts[index]
-            for index in range(len(hosts) if args.bootstrap_only else len(targets))
+            ): client_hosts[index]
+            for index in range(bootstrap_count)
         }
         for future in as_completed(futures):
             node = futures[future]
@@ -341,8 +363,9 @@ def main() -> int:
         futures = {}
         with ThreadPoolExecutor(max_workers=len(targets)) as executor:
             for index, target in enumerate(targets):
-                node = hosts[index]
-                frontend_url = expand_template(args.host_url_template, split_node(node, args.ssh_user)[1], target, index)
+                node = client_hosts[index]
+                server_host = server_hosts[index]
+                frontend_url = expand_template(args.host_url_template, split_node(server_host, args.ssh_user)[1], target, index)
                 remote_output_dir = f"{remote_output_base}/{governor}/{target}"
                 local_job_dir = phase_dir / f"{index}_{split_node(node, args.ssh_user)[1]}_{target}"
                 local_job_dir.mkdir(parents=True, exist_ok=True)
@@ -350,7 +373,8 @@ def main() -> int:
                     local_job_dir / "job.env",
                     "\n".join(
                         [
-                            f"host={split_node(node, args.ssh_user)[1]}",
+                            f"client_host={split_node(node, args.ssh_user)[1]}",
+                            f"server_host={split_node(server_host, args.ssh_user)[1]}",
                             f"target={target}",
                             f"governor={governor}",
                             f"frontend_url={frontend_url}",

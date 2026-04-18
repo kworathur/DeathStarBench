@@ -322,6 +322,7 @@ func (s *Server) CheckAvailability(ctx context.Context, req *pb.Request) (*pb.Re
 	}
 	reserveMemSpan, _ := opentracing.StartSpanFromContext(ctx, "memcached_reserve_get_multi_number")
 	ch := make(chan taskRes)
+	var taskWG sync.WaitGroup
 	reserveMemSpan.SetTag("span.kind", "client")
 	// check capacity in memcached and mongodb
 	if itemsMap, err := s.MemcClient.GetMulti(reqCommand); err != nil && err != memcache.ErrCacheMiss {
@@ -330,7 +331,9 @@ func (s *Server) CheckAvailability(ctx context.Context, req *pb.Request) (*pb.Re
 	} else {
 		reserveMemSpan.Finish()
 		// go through reservation count from memcached
+		taskWG.Add(1)
 		go func() {
+			defer taskWG.Done()
 			for k, v := range itemsMap {
 				id := strings.Split(k, "_")[0]
 				val, _ := strconv.Atoi(string(v.Value))
@@ -343,25 +346,17 @@ func (s *Server) CheckAvailability(ctx context.Context, req *pb.Request) (*pb.Re
 					checkRes: res,
 				}
 			}
-			if err == nil {
-				close(ch)
-			}
 		}()
 		// use miss reservation to get data from mongo
 		// rever string to indata and outdate
 		if err == memcache.ErrCacheMiss {
-			var wg sync.WaitGroup
 			for k := range itemsMap {
 				delete(queryMap, k)
 			}
-			wg.Add(len(queryMap))
-			go func() {
-				wg.Wait()
-				close(ch)
-			}()
 			for command := range queryMap {
+				taskWG.Add(1)
 				go func(comm string) {
-					defer wg.Done()
+					defer taskWG.Done()
 
 					var reserve []reservation
 
@@ -403,6 +398,10 @@ func (s *Server) CheckAvailability(ctx context.Context, req *pb.Request) (*pb.Re
 				}(command)
 			}
 		}
+		go func() {
+			taskWG.Wait()
+			close(ch)
+		}()
 	}
 
 	for task := range ch {
