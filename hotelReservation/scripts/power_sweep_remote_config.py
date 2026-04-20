@@ -22,6 +22,10 @@ REMOTE_KEY_PATH = os.environ.get("HOTEL_REMOTE_GIT_KEY_DEST", "~/.ssh/deathstarb
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REMOTE_REPO_ROOT = os.environ.get("HOTEL_REMOTE_REPO_ROOT", str(REPO_ROOT))
 REMOTE_SCRIPT = "hotelReservation/scripts/run_power_sweep.sh"
+REMOTE_CLIENT_SCRIPT = "hotelReservation/scripts/run_client_load_sweep.sh"
+REMOTE_SERVER_SCRIPT = "hotelReservation/scripts/run_server_power_sweep.sh"
+SERVER_STACK_START_SCRIPT = "hotelReservation/scripts/start_process_stack.sh"
+SERVER_STACK_SESSION = os.environ.get("HOTEL_SERVER_STACK_SESSION", "hotel-power-stack")
 CLONE_REPO_URL = os.environ.get(
     "HOTEL_REMOTE_CLONE_REPO_URL",
     os.popen(f"git -C {REPO_ROOT.parent} config --get remote.origin.url 2>/dev/null").read().strip(),

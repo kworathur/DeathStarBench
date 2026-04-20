@@ -38,6 +38,13 @@ def expand_remote_path(path: str) -> str:
     return f"~/{path}"
 
 
+def resolve_remote_path(conn, path: str) -> str:
+    expanded = expand_remote_path(path)
+    quoted = shlex.quote(expanded)
+    _, stdout, _ = run_remote_command(conn, f"bash -lc 'cd {quoted} && pwd'", must_succeed=True)
+    return stdout.strip()
+
+
 def git_host_from_url(url: str) -> str | None:
     if not url:
         return None
