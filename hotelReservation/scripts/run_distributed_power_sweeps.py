@@ -173,7 +173,7 @@ python3 - <<'PY'
 from pathlib import Path
 host = {git_host!r}
 identity = {remote_key_path!r}
-config_path = Path.home() / ".ssh" / "config"
+config_path =  "~/.ssh" / "config"
 lines = config_path.read_text(encoding="utf-8").splitlines() if config_path.exists() else []
 filtered = []
 skip = False
