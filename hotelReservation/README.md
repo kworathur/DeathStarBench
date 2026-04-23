@@ -203,6 +203,8 @@ The distributed entrypoint is now a Python orchestrator, aligned with the remote
 
 Use `--refresh-repo` to `git fetch` and `git pull --ff-only` on existing remote checkouts before starting a new sweep.
 
+../wrk2/wrk -D exp -t 4 -c 128 -d 300 -L -s ./wrk2/scripts/hotel-reservation/single-endpoint.lua http://c220g1-030808.wisc.cloudlab.us:5000 -R 10000 > schedutil_10000_hotels.txt
+
 ### Questions and contact
 
 You are welcome to submit a pull request if you find a bug or have extended the application in an interesting way. For any questions please contact us at: <microservices-bench-L@list.cornell.edu>
