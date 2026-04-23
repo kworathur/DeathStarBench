@@ -12,8 +12,8 @@ METRICS_SCRIPT="$REPO_ROOT/hotelReservation/scripts/parse_wrk_metrics.py"
 
 TARGET="hotels"
 HOST="http://localhost:5000"
-THREADS=2
-CONNECTIONS=2
+THREADS=4
+CONNECTIONS=128
 DURATION_SECONDS=30
 RATES_SPEC="1000:7000:1000"
 MODE="combined"
@@ -293,6 +293,7 @@ run_single_point() {
       powerstat_cmd+=( -R )
     fi
     powerstat_cmd+=( "$POWERSTAT_INTERVAL" "$count" )
+    echo "powerstat_cmd: ${powerstat_cmd[@]}"
     "${powerstat_cmd[@]}" >"$power_output" 2>&1 &
     powerstat_pid=$!
     sleep 0.2
