@@ -20,6 +20,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tqdm import tqdm
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -332,13 +334,39 @@ def main() -> int:
     all_server_rows: list[dict] = []
     all_client_rows: list[dict] = []
 
-    for rate in rates:
+    total_trials = len(rates) * len(cfg.DEFAULT_GOVERNORS)
+    trial_bar = tqdm(
+        total=total_trials,
+        desc="Trials",
+        unit="trial",
+        dynamic_ncols=True,
+    )
+
+    rate_bar = tqdm(
+        rates,
+        desc="Rates",
+        unit="rate",
+        dynamic_ncols=True,
+        leave=True,
+    )
+
+    for rate in rate_bar:
+        rate_bar.set_description(f"Rate {rate} rps")
         rate_dir = local_output_dir / f"rate_{rate}"
         write_text(rate_dir / "rate.txt", f"rate={rate}\n")
-        print(f"\n=== Rate {rate} rps ===")
 
-        for governor in cfg.DEFAULT_GOVERNORS:
-            print(f"  Governor: {governor}")
+        gov_bar = tqdm(
+            cfg.DEFAULT_GOVERNORS,
+            desc="Governors",
+            unit="gov",
+            dynamic_ncols=True,
+            leave=False,
+        )
+
+        for governor in gov_bar:
+            gov_bar.set_description(f"{governor} @ {rate} rps")
+            trial_bar.set_description(f"Running {governor} @ {rate} rps")
+
             job_dir = rate_dir / governor
             server_log_dir = job_dir / "server"
             client_log_dir = job_dir / "client"
@@ -399,17 +427,26 @@ def main() -> int:
                 f"server_exit={server_exit}\nclient_exit={client_exit}\n",
             )
 
+            trial_bar.update(1)
+
             if not status_ok:
                 failures += 1
-                print(
-                    f"    FAILED: server_exit={server_exit} client_exit={client_exit}",
+                trial_bar.set_description(
+                    f"FAILED {governor} @ {rate} rps "
+                    f"(server={server_exit}, client={client_exit})"
+                )
+                tqdm.write(
+                    f"FAILED {governor} @ {rate} rps: "
+                    f"server_exit={server_exit} client_exit={client_exit}",
                     file=sys.stderr,
                 )
                 if server_stderr.strip():
-                    print(f"    server stderr: {server_stderr.strip()}", file=sys.stderr)
+                    tqdm.write(f"  server stderr: {server_stderr.strip()}", file=sys.stderr)
                 if client_stderr.strip():
-                    print(f"    client stderr: {client_stderr.strip()}", file=sys.stderr)
+                    tqdm.write(f"  client stderr: {client_stderr.strip()}", file=sys.stderr)
                 continue
+
+            trial_bar.set_description(f"OK {governor} @ {rate} rps")
 
             # Collect server CSV rows
             server_csv_path = f"{server_remote_output}/results.csv"
@@ -429,6 +466,11 @@ def main() -> int:
             all_client_rows.extend(
                 parse_csv_rows(client_csv_path.read_text(encoding="utf-8"))
             )
+
+        gov_bar.close()
+
+    rate_bar.close()
+    trial_bar.close()
 
     # Merge and write the combined CSV
     merged = merge_rows(all_server_rows, all_client_rows)
