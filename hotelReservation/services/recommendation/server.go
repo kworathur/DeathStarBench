@@ -156,13 +156,13 @@ func loadRecommendations(client *mongo.Client) map[string]Hotel {
 	collection := client.Database("recommendation-db").Collection("recommendation")
 	curr, err := collection.Find(context.TODO(), bson.D{})
 	if err != nil {
-		log.Error().Msgf("Failed get hotels data: ", err)
+		log.Error().Msgf("Failed get hotels data: %v", err)
 	}
 
 	var hotels []Hotel
 	curr.All(context.TODO(), &hotels)
 	if err != nil {
-		log.Error().Msgf("Failed get hotels data: ", err)
+		log.Error().Msgf("Failed get hotels data: %v", err)
 	}
 
 	profiles := make(map[string]Hotel)

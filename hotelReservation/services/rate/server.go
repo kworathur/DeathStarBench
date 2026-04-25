@@ -1,13 +1,8 @@
 package rate
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"net"
-	"sort"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
@@ -18,7 +13,6 @@ import (
 	"github.com/grpc-ecosystem/grpc-opentracing/go/otgrpc"
 	"github.com/opentracing/opentracing-go"
 	"github.com/rs/zerolog/log"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -87,104 +81,6 @@ func (s *Server) Run() error {
 // Shutdown cleans up any processes
 func (s *Server) Shutdown() {
 	s.Registry.Deregister(s.uuid)
-}
-
-// GetRates gets rates for hotels for specific date range.
-func (s *Server) GetRates(ctx context.Context, req *pb.Request) (*pb.Result, error) {
-	res := new(pb.Result)
-
-	ratePlans := make(RatePlans, 0)
-
-	hotelIds := []string{}
-	rateMap := make(map[string]struct{})
-	for _, hotelID := range req.HotelIds {
-		hotelIds = append(hotelIds, hotelID)
-		rateMap[hotelID] = struct{}{}
-	}
-	// first check memcached(get-multi)
-	memSpan, _ := opentracing.StartSpanFromContext(ctx, "memcached_get_multi_rate")
-	memSpan.SetTag("span.kind", "client")
-
-	resMap, err := s.MemcClient.GetMulti(hotelIds)
-	memSpan.Finish()
-
-	var wg sync.WaitGroup
-	var mutex sync.Mutex
-	if err != nil && err != memcache.ErrCacheMiss {
-		log.Panic().Msgf("Memmcached error while trying to get hotel [id: %v]= %s", hotelIds, err)
-	} else {
-		for hotelId, item := range resMap {
-			rateStrs := strings.Split(string(item.Value), "\n")
-			log.Trace().Msgf("memc hit, hotelId = %s,rate strings: %v", hotelId, rateStrs)
-
-			for _, rateStr := range rateStrs {
-				if len(rateStr) != 0 {
-					rateP := new(pb.RatePlan)
-					json.Unmarshal([]byte(rateStr), rateP)
-					ratePlans = append(ratePlans, rateP)
-				}
-			}
-
-			delete(rateMap, hotelId)
-		}
-
-		wg.Add(len(rateMap))
-		for hotelId := range rateMap {
-			go func(id string) {
-				log.Trace().Msgf("memc miss, hotelId = %s", id)
-				log.Trace().Msg("memcached miss, querying mongo for the requested hotel and date range")
-
-				mongoSpan, _ := opentracing.StartSpanFromContext(ctx, "mongo_rate")
-				mongoSpan.SetTag("span.kind", "client")
-
-				collection := s.MongoClient.Database("rate-db").Collection("inventory")
-				filter := bson.D{
-					{"hotelId", id},
-					{"inDate", bson.D{{"$lte", req.InDate}}},
-					{"outDate", bson.D{{"$gte", req.OutDate}}},
-				}
-				curr, err := collection.Find(context.TODO(), filter)
-				if err != nil {
-					log.Error().Msgf("Failed to get rate data for hotel %s: %v", id, err)
-				}
-
-				tmpRatePlans := make(RatePlans, 0)
-				if curr != nil {
-					if err := curr.All(context.TODO(), &tmpRatePlans); err != nil {
-						log.Error().Msgf("Failed to decode rate data for hotel %s: %v", id, err)
-						tmpRatePlans = nil
-					}
-				}
-
-				mongoSpan.Finish()
-
-				memcStr := ""
-				if err != nil {
-					log.Panic().Msgf("Tried to find hotelId [%v], but got error", id, err.Error())
-				} else {
-					for _, r := range tmpRatePlans {
-						mutex.Lock()
-						ratePlans = append(ratePlans, r)
-						mutex.Unlock()
-						rateJson, err := json.Marshal(r)
-						if err != nil {
-							log.Error().Msgf("Failed to marshal plan [Code: %v] with error: %s", r.Code, err)
-						}
-						memcStr = memcStr + string(rateJson) + "\n"
-					}
-				}
-				go s.MemcClient.Set(&memcache.Item{Key: id, Value: []byte(memcStr)})
-
-				defer wg.Done()
-			}(hotelId)
-		}
-	}
-	wg.Wait()
-
-	sort.Sort(ratePlans)
-	res.RatePlans = ratePlans
-
-	return res, nil
 }
 
 type RatePlans []*pb.RatePlan
