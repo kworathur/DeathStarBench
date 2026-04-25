@@ -13,14 +13,13 @@ import csv
 import io
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-
-from tqdm import tqdm
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -235,6 +234,45 @@ def fetch_remote_csv(
         conn.close()
 
 
+def fetch_remote_logs(
+    host: str,
+    ssh_user: str,
+    ssh_key: str | None,
+    remote_log_dir: str,
+    local_dest: Path,
+) -> None:
+    """Copy all files from a remote logs/ directory into local_dest via SFTP."""
+    _, resolved_host = split_node(host, ssh_user)
+    conn = connect(resolved_host, ssh_user, ssh_key)
+    try:
+        sftp = conn.open_sftp()
+        try:
+            try:
+                entries = sftp.listdir(remote_log_dir)
+            except FileNotFoundError:
+                return
+            local_dest.mkdir(parents=True, exist_ok=True)
+            for name in entries:
+                remote_file = f"{remote_log_dir}/{name}"
+                local_file = local_dest / name
+                with sftp.open(remote_file, "rb") as rfh:
+                    local_file.write_bytes(rfh.read())
+        finally:
+            sftp.close()
+    finally:
+        conn.close()
+
+
+def copy_local_logs(src_log_dir: Path, local_dest: Path) -> None:
+    """Copy all files from src_log_dir into local_dest."""
+    if not src_log_dir.is_dir():
+        return
+    local_dest.mkdir(parents=True, exist_ok=True)
+    for entry in src_log_dir.iterdir():
+        if entry.is_file():
+            shutil.copy2(entry, local_dest / entry.name)
+
+
 def parse_csv_rows(text: str) -> list[dict]:
     """Parse CSV text (with header) into a list of dicts."""
     reader = csv.DictReader(io.StringIO(text))
@@ -286,6 +324,120 @@ def write_merged_csv(path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
+def _parse_float(row: dict, key: str) -> float | None:
+    val = row.get(key, "NA")
+    if val in ("NA", "", None):
+        return None
+    try:
+        return float(val)
+    except ValueError:
+        return None
+
+
+def plot_throughput_comparison(path: Path, rows: list[dict]) -> None:
+    """Plot target arrival rate vs actual throughput, one line per governor.
+
+    A dashed identity line (actual == target) is included as a reference,
+    matching the style of avgload_vs_throughput.png from plot_qps_metrics.py.
+    """
+    import matplotlib.pyplot as plt
+
+    by_governor: dict[str, list[dict]] = {}
+    for row in rows:
+        if _parse_float(row, "arrival_rate_rps") is None:
+            continue
+        if _parse_float(row, "requests_sec") is None:
+            continue
+        by_governor.setdefault(row["governor"], []).append(row)
+
+    if not by_governor:
+        return
+
+    colours = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    gov_colour = {gov: colours[i % len(colours)] for i, gov in enumerate(sorted(by_governor))}
+
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+
+    all_targets: list[float] = []
+    for gov, gov_rows in sorted(by_governor.items()):
+        gov_rows = sorted(gov_rows, key=lambda r: float(r["arrival_rate_rps"]))
+        x = [float(r["arrival_rate_rps"]) for r in gov_rows]
+        y = [float(r["requests_sec"]) for r in gov_rows]
+        all_targets.extend(x)
+        ax.plot(x, y, marker="o", linewidth=2, color=gov_colour[gov], label=gov)
+
+    # Identity reference line: actual == target
+    if all_targets:
+        lo, hi = min(all_targets), max(all_targets)
+        ax.plot([lo, hi], [lo, hi], linestyle="--", color="grey", linewidth=1.5, label="target (ideal)")
+
+    ax.set_xlabel("Target Arrival Rate (RPS)")
+    ax.set_ylabel("Actual Throughput (RPS)")
+    ax.set_title("Target vs Actual Throughput by Governor")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
+def plot_latency_comparison(path: Path, rows: list[dict]) -> None:
+    """Plot arrival rate vs latency percentiles, one line per governor per percentile.
+
+    Governors are distinguished by colour; percentiles by line style, matching
+    the style used in export_reference_qps_run.plot_combined_latency.
+    """
+    import matplotlib.pyplot as plt
+
+    # Group rows by governor, keeping only rows with full latency data.
+    _LATENCY_COLS = ("p50_ms", "p90_ms", "p95_ms", "p99_ms")
+    by_governor: dict[str, list[dict]] = {}
+    for row in rows:
+        if _parse_float(row, "arrival_rate_rps") is None:
+            continue
+        if any(_parse_float(row, c) is None for c in _LATENCY_COLS):
+            continue
+        gov = row["governor"]
+        by_governor.setdefault(gov, []).append(row)
+
+    if not by_governor:
+        return
+
+    # Assign a colour per governor and a style per percentile.
+    colours = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    gov_colour = {gov: colours[i % len(colours)] for i, gov in enumerate(sorted(by_governor))}
+    percentile_styles = [
+        ("p50_ms", "P50", "-"),
+        ("p90_ms", "P90", "--"),
+        ("p95_ms", "P95", "-."),
+        ("p99_ms", "P99", ":"),
+    ]
+
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    for gov, gov_rows in sorted(by_governor.items()):
+        gov_rows = sorted(gov_rows, key=lambda r: float(r["arrival_rate_rps"]))
+        x = [float(r["arrival_rate_rps"]) for r in gov_rows]
+        for col, label, style in percentile_styles:
+            y = [float(r[col]) for r in gov_rows]
+            ax.plot(
+                x, y,
+                linestyle=style,
+                marker="o",
+                linewidth=2,
+                color=gov_colour[gov],
+                label=f"{gov} {label}",
+            )
+
+    ax.set_xlabel("Arrival Rate (RPS)")
+    ax.set_ylabel("Latency (ms)")
+    ax.set_title("Arrival Rate vs Latency by Governor")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend(fontsize="small", ncol=len(by_governor))
+    fig.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
 def main() -> int:
     args = parse_args()
     server_host = args.server_host
@@ -334,39 +486,13 @@ def main() -> int:
     all_server_rows: list[dict] = []
     all_client_rows: list[dict] = []
 
-    total_trials = len(rates) * len(cfg.DEFAULT_GOVERNORS)
-    trial_bar = tqdm(
-        total=total_trials,
-        desc="Trials",
-        unit="trial",
-        dynamic_ncols=True,
-    )
-
-    rate_bar = tqdm(
-        rates,
-        desc="Rates",
-        unit="rate",
-        dynamic_ncols=True,
-        leave=True,
-    )
-
-    for rate in rate_bar:
-        rate_bar.set_description(f"Rate {rate} rps")
+    for rate in rates:
         rate_dir = local_output_dir / f"rate_{rate}"
         write_text(rate_dir / "rate.txt", f"rate={rate}\n")
+        print(f"\n=== Rate {rate} rps ===")
 
-        gov_bar = tqdm(
-            cfg.DEFAULT_GOVERNORS,
-            desc="Governors",
-            unit="gov",
-            dynamic_ncols=True,
-            leave=False,
-        )
-
-        for governor in gov_bar:
-            gov_bar.set_description(f"{governor} @ {rate} rps")
-            trial_bar.set_description(f"Running {governor} @ {rate} rps")
-
+        for governor in cfg.DEFAULT_GOVERNORS:
+            print(f"  Governor: {governor}")
             job_dir = rate_dir / governor
             server_log_dir = job_dir / "server"
             client_log_dir = job_dir / "client"
@@ -427,26 +553,17 @@ def main() -> int:
                 f"server_exit={server_exit}\nclient_exit={client_exit}\n",
             )
 
-            trial_bar.update(1)
-
             if not status_ok:
                 failures += 1
-                trial_bar.set_description(
-                    f"FAILED {governor} @ {rate} rps "
-                    f"(server={server_exit}, client={client_exit})"
-                )
-                tqdm.write(
-                    f"FAILED {governor} @ {rate} rps: "
-                    f"server_exit={server_exit} client_exit={client_exit}",
+                print(
+                    f"    FAILED: server_exit={server_exit} client_exit={client_exit}",
                     file=sys.stderr,
                 )
                 if server_stderr.strip():
-                    tqdm.write(f"  server stderr: {server_stderr.strip()}", file=sys.stderr)
+                    print(f"    server stderr: {server_stderr.strip()}", file=sys.stderr)
                 if client_stderr.strip():
-                    tqdm.write(f"  client stderr: {client_stderr.strip()}", file=sys.stderr)
+                    print(f"    client stderr: {client_stderr.strip()}", file=sys.stderr)
                 continue
-
-            trial_bar.set_description(f"OK {governor} @ {rate} rps")
 
             # Collect server CSV rows
             server_csv_path = f"{server_remote_output}/results.csv"
@@ -457,26 +574,84 @@ def main() -> int:
                     ssh_key=args.ssh_key or None,
                     remote_path=server_csv_path,
                 )
+                # Fetch powerstat logs from the remote server for debugging
+                fetch_remote_logs(
+                    host=server_host,
+                    ssh_user=args.ssh_user,
+                    ssh_key=args.ssh_key or None,
+                    remote_log_dir=f"{server_remote_output}/logs",
+                    local_dest=server_log_dir / "logs",
+                )
             else:
                 server_csv_text = Path(server_csv_path).read_text(encoding="utf-8")
+                # Copy powerstat logs from the local server output for debugging
+                copy_local_logs(
+                    Path(server_remote_output) / "logs",
+                    server_log_dir / "logs",
+                )
             all_server_rows.extend(parse_csv_rows(server_csv_text))
 
-            # Collect client CSV rows (always local)
+            # Collect client CSV rows (always local).
+            # run_power_sweep.sh sets governor="client" in client mode, so
+            # override it with the actual governor so the merge key matches.
             client_csv_path = Path(client_remote_output) / "results.csv"
-            all_client_rows.extend(
-                parse_csv_rows(client_csv_path.read_text(encoding="utf-8"))
+            client_rows = parse_csv_rows(client_csv_path.read_text(encoding="utf-8"))
+            for row in client_rows:
+                row["governor"] = governor
+            all_client_rows.extend(client_rows)
+            # Copy wrk2 logs from the local client output for debugging
+            copy_local_logs(
+                Path(client_remote_output) / "logs",
+                client_log_dir / "logs",
             )
-
-        gov_bar.close()
-
-    rate_bar.close()
-    trial_bar.close()
 
     # Merge and write the combined CSV
     merged = merge_rows(all_server_rows, all_client_rows)
     merged_csv_path = local_output_dir / "results.csv"
     write_merged_csv(merged_csv_path, merged)
     print(f"\nMerged results CSV: {merged_csv_path}")
+
+    # Generate plots from the merged results.
+    # plot_power_sweep.py requires numeric values in all rows, so filter to
+    # rows where both power and latency data are present.
+    _NUMERIC_PLOT_COLS = {"requests_sec", "avg_power_watts"}
+    plottable = [
+        r for r in merged
+        if all(r.get(c, "NA") not in ("NA", "", None) for c in _NUMERIC_PLOT_COLS)
+    ]
+    if plottable:
+        plot_csv_path = local_output_dir / "results_plottable.csv"
+        write_merged_csv(plot_csv_path, plottable)
+        plot_path = local_output_dir / "arrival_rate_vs_power.png"
+        plot_script = SCRIPT_DIR / "plot_power_sweep.py"
+        plot_result = subprocess.run(
+            [sys.executable, str(plot_script), "--input", str(plot_csv_path), "--output", str(plot_path)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if plot_result.returncode == 0:
+            print(f"Plot saved: {plot_path}")
+        else:
+            print(f"Warning: plot_power_sweep.py failed:\n{plot_result.stderr.strip()}", file=sys.stderr)
+    else:
+        print("No fully-merged rows available for plotting (missing power or latency data).", file=sys.stderr)
+
+    # Arrival rate vs latency comparison plot (one series per governor per percentile).
+    latency_plot_path = local_output_dir / "arrival_rate_vs_latency.png"
+    try:
+        plot_latency_comparison(latency_plot_path, merged)
+        print(f"Plot saved: {latency_plot_path}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: latency plot failed: {exc}", file=sys.stderr)
+
+    # Target vs actual throughput plot (one series per governor).
+    throughput_plot_path = local_output_dir / "arrival_rate_vs_throughput.png"
+    try:
+        plot_throughput_comparison(throughput_plot_path, merged)
+        print(f"Plot saved: {throughput_plot_path}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: throughput plot failed: {exc}", file=sys.stderr)
 
     if failures:
         print(f"\nWarning: {failures} job(s) failed. See status.log files under {local_output_dir}.")
