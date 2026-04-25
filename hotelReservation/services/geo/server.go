@@ -136,13 +136,13 @@ func newGeoIndex(client *mongo.Client) *geoindex.ClusteringIndex {
 	collection := client.Database("geo-db").Collection("geo")
 	curr, err := collection.Find(context.TODO(), bson.D{})
 	if err != nil {
-		log.Error().Msgf("Failed get geo data: %v", err)
+		log.Error().Msgf("Failed get geo data: ", err)
 	}
 
 	var points []*point
 	curr.All(context.TODO(), &points)
 	if err != nil {
-		log.Error().Msgf("Failed get geo data: %v", err)
+		log.Error().Msgf("Failed get geo data: ", err)
 	}
 
 	// add points to index

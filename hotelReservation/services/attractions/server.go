@@ -118,7 +118,7 @@ func (s *Server) NearbyRest(ctx context.Context, req *pb.Request) (*pb.Result, e
 
 	curr, err := c.Find(context.TODO(), bson.M{"hotelId": req.HotelId})
 	if err != nil {
-		log.Error().Msgf("Failed get hotels: %v", err)
+		log.Error().Msgf("Failed get hotels: ", err)
 	}
 	var hotelReqs []point
 	curr.All(context.TODO(), &hotelReqs)
@@ -155,7 +155,7 @@ func (s *Server) NearbyMus(ctx context.Context, req *pb.Request) (*pb.Result, er
 
 	curr, err := c.Find(context.TODO(), bson.M{"hotelId": req.HotelId})
 	if err != nil {
-		log.Error().Msgf("Failed get hotels: %v", err)
+		log.Error().Msgf("Failed get hotels: ", err)
 	}
 	var hotelReqs []point
 	curr.All(context.TODO(), &hotelReqs)
@@ -192,7 +192,7 @@ func (s *Server) NearbyCinema(ctx context.Context, req *pb.Request) (*pb.Result,
 
 	curr, err := c.Find(context.TODO(), bson.M{"hotelId": req.HotelId})
 	if err != nil {
-		log.Error().Msgf("Failed get hotels: %v", err)
+		log.Error().Msgf("Failed get hotels: ", err)
 	}
 	var hotelReqs []point
 	curr.All(context.TODO(), &hotelReqs)
@@ -297,13 +297,13 @@ func newGeoIndex(client *mongo.Client) *geoindex.ClusteringIndex {
 	collection := client.Database("attractions-db").Collection("hotels")
 	curr, err := collection.Find(context.TODO(), bson.D{})
 	if err != nil {
-		log.Error().Msgf("Failed get hotels data: %v", err)
+		log.Error().Msgf("Failed get hotels data: ", err)
 	}
 
 	var points []*point
 	curr.All(context.TODO(), &points)
 	if err != nil {
-		log.Error().Msgf("Failed get hotels data: %v", err)
+		log.Error().Msgf("Failed get hotels data: ", err)
 	}
 
 	// add points to index
@@ -322,13 +322,13 @@ func newGeoIndexRest(client *mongo.Client) *geoindex.ClusteringIndex {
 	collection := client.Database("attractions-db").Collection("restaurants")
 	curr, err := collection.Find(context.TODO(), bson.D{})
 	if err != nil {
-		log.Error().Msgf("Failed get restaurant data: %v", err)
+		log.Error().Msgf("Failed get restaurant data: ", err)
 	}
 
 	var points []*Restaurant
 	curr.All(context.TODO(), &points)
 	if err != nil {
-		log.Error().Msgf("Failed get restaurant data: %v", err)
+		log.Error().Msgf("Failed get restaurant data: ", err)
 	}
 
 	// add points to index
@@ -347,13 +347,13 @@ func newGeoIndexMus(client *mongo.Client) *geoindex.ClusteringIndex {
 	collection := client.Database("attractions-db").Collection("museums")
 	curr, err := collection.Find(context.TODO(), bson.D{})
 	if err != nil {
-		log.Error().Msgf("Failed get restaurant data: %v", err)
+		log.Error().Msgf("Failed get restaurant data: ", err)
 	}
 
 	var points []*Museum
 	curr.All(context.TODO(), &points)
 	if err != nil {
-		log.Error().Msgf("Failed get restaurant data: %v", err)
+		log.Error().Msgf("Failed get restaurant data: ", err)
 	}
 
 	// add points to index
@@ -372,13 +372,13 @@ func newGeoIndexCinema(client *mongo.Client) *geoindex.ClusteringIndex {
 	collection := client.Database("attractions-db").Collection("cinemas")
 	curr, err := collection.Find(context.TODO(), bson.D{})
 	if err != nil {
-		log.Error().Msgf("Failed get cinema data: %v", err)
+		log.Error().Msgf("Failed get cinema data: ", err)
 	}
 
 	var points []*Cinema
 	curr.All(context.TODO(), &points)
 	if err != nil {
-		log.Error().Msgf("Failed get cinema data: %v", err)
+		log.Error().Msgf("Failed get cinema data: ", err)
 	}
 
 	// add points to index

@@ -134,14 +134,14 @@ func (s *Server) GetReviews(ctx context.Context, req *pb.Request) (*pb.Result, e
 
 			curr, err := c.Find(context.TODO(), bson.M{"hotelId": hotelId})
 			if err != nil {
-				log.Error().Msgf("Failed get reviews: %v", err)
+				log.Error().Msgf("Failed get reviews: ", err)
 			}
 
 			var reviewHelpers []ReviewHelper
 			//err = c.Find(bson.M{"hotelId": hotelId}).All(&reviewHelpers)
 			curr.All(context.TODO(), &reviewHelpers)
 			if err != nil {
-				log.Error().Msgf("Failed get hotels data: %v", err)
+				log.Error().Msgf("Failed get hotels data: ", err)
 			}
 
 			for _, reviewHelper := range reviewHelpers {
@@ -156,7 +156,7 @@ func (s *Server) GetReviews(ctx context.Context, req *pb.Request) (*pb.Result, e
 
 			reviewJson, err := json.Marshal(reviews)
 			if err != nil {
-				log.Error().Msgf("Failed to marshal hotel [id: %v] with err: %v", hotelId, err)
+				log.Error().Msgf("Failed to marshal hotel [id: %v] with err:", hotelId, err)
 			}
 			memcStr := string(reviewJson)
 
