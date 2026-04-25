@@ -71,6 +71,66 @@ flowchart LR
     R --> MGR[(Mongo reservation-db)]
 ```
 
+## Building Without Memcached (`no_memcache` build tag)
+
+By default the profile, rate, and reservation services use Memcached as a read-through cache in front of MongoDB. If you want to run without Memcached — for benchmarking MongoDB in isolation, simplifying test environments, or deploying where Memcached is unavailable — compile with the `no_memcache` build tag.
+
+### What changes
+
+When built with `no_memcache`:
+- The **profile**, **rate**, and **reservation** services skip Memcached entirely and query MongoDB directly on every request.
+- No `MemcClient` connection is initialised; no Memcached address is required in the config.
+- All gRPC interfaces and HTTP endpoints remain identical.
+
+The default build (no tag) is completely unaffected.
+
+### Building
+
+```bash
+# Default build (Memcached caching enabled)
+go build ./...
+
+# No-cache build (Memcached bypassed, MongoDB only)
+go build -tags no_memcache ./...
+```
+
+### Running tests
+
+```bash
+# Default path tests
+go test ./...
+
+# no_memcache path tests (includes property-based tests)
+go test -tags no_memcache ./...
+```
+
+### Docker Compose
+
+Pass the build tag via `GOFLAGS`:
+
+```bash
+GOFLAGS="-tags=no_memcache" docker compose up -d --build
+```
+
+You can also omit the Memcached container from your compose override since it will not be contacted.
+
+### Request call graph (`no_memcache` build)
+
+```mermaid
+flowchart LR
+    C[Client] --> F[Frontend /hotels]
+    F --> S[Search.Nearby]
+    S --> G[Geo.Nearby]
+    S --> R1[Rate.GetRates]
+    R1 --> MGR[(Mongo rate-db.inventory)]
+    F --> RS[Reservation.CheckAvailability]
+    RS --> MGS[(Mongo reservation-db)]
+    F --> P[Profile.GetProfiles]
+    P --> MGP[(Mongo profile-db.hotels)]
+```
+
+---
+
 ## Pre-requirements
 - Docker
 - Docker-compose
@@ -124,6 +184,31 @@ curl "http://localhost:5000/hotels?inDate=2015-04-09&outDate=2015-04-10&lat=38.0
 ```
 
 Service logs are written to `/tmp/hotel-logs/`.
+
+#### Running without Memcached (`no_memcache`)
+
+`start_services.sh` runs whatever binaries are in `bin/`. To deploy without Memcached, rebuild the three affected services with the `no_memcache` tag before starting:
+
+```bash
+# Rebuild only the services that use Memcached
+for svc in profile rate reservation; do
+    go build -tags no_memcache -o "bin/$svc" "./cmd/$svc"
+done
+```
+
+Then start as normal — Memcached does not need to be running:
+
+```bash
+./scripts/start_services.sh
+```
+
+To go back to the default (Memcached-enabled) build, rebuild without the tag:
+
+```bash
+for svc in profile rate reservation; do
+    go build -o "bin/$svc" "./cmd/$svc"
+done
+```
 
 ### In Docker Containers
 
