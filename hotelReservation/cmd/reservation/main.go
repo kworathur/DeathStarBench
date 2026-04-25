@@ -10,7 +10,6 @@ import (
 
 	"github.com/delimitrou/DeathStarBench/tree/master/hotelReservation/config"
 	"github.com/delimitrou/DeathStarBench/tree/master/hotelReservation/registry"
-	"github.com/delimitrou/DeathStarBench/tree/master/hotelReservation/services/reservation"
 	"github.com/delimitrou/DeathStarBench/tree/master/hotelReservation/tracing"
 	"github.com/delimitrou/DeathStarBench/tree/master/hotelReservation/tune"
 	"github.com/rs/zerolog"
@@ -31,11 +30,6 @@ func main() {
 	log.Info().Msg("Initializing DB connection...")
 	mongoClient, mongoClose := initializeDatabase(result["ReserveMongoAddress"])
 	defer mongoClose()
-
-	log.Info().Msgf("Read profile memcashed address: %v", result["ReserveMemcAddress"])
-	log.Info().Msg("Initializing Memcashed client...")
-	memcClient := tune.NewMemCClient2(result["ReserveMemcAddress"])
-	log.Info().Msg("Success")
 
 	servPort, _ := strconv.Atoi(result["ReservePort"])
 	servIP := result["ReserveIP"]
@@ -60,14 +54,7 @@ func main() {
 	}
 	log.Info().Msg("Consul agent initialized")
 
-	srv := &reservation.Server{
-		Tracer:      tracer,
-		Registry:    registry,
-		Port:        servPort,
-		IpAddr:      servIP,
-		MongoClient: mongoClient,
-		MemcClient:  memcClient,
-	}
+	srv := buildServer(result, mongoClient, tracer, registry, servPort, servIP)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)

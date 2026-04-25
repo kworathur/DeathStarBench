@@ -101,7 +101,7 @@ func (s *Server) CheckUser(ctx context.Context, req *pb.Request) (*pb.Result, er
 		res.Correct = pass == true_pass
 	}
 
-	log.Trace().Msgf("CheckUser %d", res.Correct)
+	log.Trace().Msgf("CheckUser %t", res.Correct)
 
 	return res, nil
 }
@@ -111,13 +111,13 @@ func loadUsers(client *mongo.Client) map[string]string {
 	collection := client.Database("user-db").Collection("user")
 	curr, err := collection.Find(context.TODO(), bson.D{})
 	if err != nil {
-		log.Error().Msgf("Failed get users data: ", err)
+		log.Error().Msgf("Failed get users data: %v", err)
 	}
 
 	var users []User
 	curr.All(context.TODO(), &users)
 	if err != nil {
-		log.Error().Msgf("Failed get users data: ", err)
+		log.Error().Msgf("Failed get users data: %v", err)
 	}
 
 	res := make(map[string]string)

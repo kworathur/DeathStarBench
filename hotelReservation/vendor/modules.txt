@@ -312,4 +312,7 @@ google.golang.org/protobuf/types/descriptorpb
 google.golang.org/protobuf/types/known/anypb
 google.golang.org/protobuf/types/known/durationpb
 google.golang.org/protobuf/types/known/timestamppb
+# pgregory.net/rapid v1.1.0
+## explicit; go 1.18
+pgregory.net/rapid
 # github.com/hashicorp/consul => github.com/hashicorp/consul v1.15.7
