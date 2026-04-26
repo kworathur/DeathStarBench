@@ -11,133 +11,55 @@ Supported actions:
 * Recommend hotels based on user provided metrics
 * Place reservations
 
-## Request Call Graphs
 
-The benchmark workload uses four request types (from `wrk2/scripts/hotel-reservation/mixed-workload_type_1.lua`):
+## Reproducing the Progress Report Results
 
-- `GET /hotels` with 60% probability
-- `GET /recommendations` with 39% probability
-- `POST /user` with 0.5% probability
-- `POST /reservation` with 0.5% probability
-
-### `GET /hotels`
-
-```mermaid
-flowchart LR
-    C[Client] --> F[Frontend /hotels]
-    F --> S[Search.Nearby]
-    S --> G[Geo.Nearby]
-    S --> R1[Rate.GetRates]
-    R1 --> MR[(Memcached Rate)]
-    R1 --> MGR[(Mongo rate-db.inventory)]
-    F --> RS[Reservation.CheckAvailability]
-    RS --> MRS[(Memcached Reserve)]
-    RS --> MGS[(Mongo reservation-db)]
-    F --> P[Profile.GetProfiles]
-    P --> MP[(Memcached Profile)]
-    P --> MGP[(Mongo profile-db.hotels)]
-```
-
-### `GET /recommendations`
-
-```mermaid
-flowchart LR
-    C[Client] --> F[Frontend /recommendations]
-    F --> R[Recommendation.GetRecommendations]
-    R -. startup load .-> MGR[(Mongo recommendation-db)]
-    F --> P[Profile.GetProfiles]
-    P --> MP[(Memcached Profile)]
-    P --> MGP[(Mongo profile-db.hotels)]
-```
-
-### `POST /user`
-
-```mermaid
-flowchart LR
-    C[Client] --> F[Frontend /user]
-    F --> U[User.CheckUser]
-    U -. startup load .-> MGU[(Mongo user-db)]
-```
-
-### `POST /reservation`
-
-```mermaid
-flowchart LR
-    C[Client] --> F[Frontend /reservation]
-    F --> U[User.CheckUser]
-    U -. startup load .-> MGU[(Mongo user-db)]
-    F --> R[Reservation.MakeReservation]
-    R --> MR[(Memcached Reserve)]
-    R --> MGR[(Mongo reservation-db)]
-```
-
-## Building Without Memcached (`no_memcache` build tag)
-
-By default the profile, rate, and reservation services use Memcached as a read-through cache in front of MongoDB. If you want to run without Memcached — for benchmarking MongoDB in isolation, simplifying test environments, or deploying where Memcached is unavailable — compile with the `no_memcache` build tag.
-
-### What changes
-
-When built with `no_memcache`:
-- The **profile**, **rate**, and **reservation** services skip Memcached entirely and query MongoDB directly on every request.
-- No `MemcClient` connection is initialised; no Memcached address is required in the config.
-- All gRPC interfaces and HTTP endpoints remain identical.
-
-The default build (no tag) is completely unaffected.
-
-### Building
+1. SSH into the client node and clone the repo 
 
 ```bash
-# Default build (Memcached caching enabled)
-go build ./...
-
-# No-cache build (Memcached bypassed, MongoDB only)
-go build -tags no_memcache ./...
+git clone --recurse-submodules git@github.com:kworathur/DeathStarBench.git
 ```
 
-### Running tests
+2. Run the `install.sh` script (required for `wrk2`)
+```bash
+cd DeathStarBench/hotelReservation
+./scripts/install.sh
+```
+
+3. SSH into the server node and clone the repo
 
 ```bash
-# Default path tests
-go test ./...
-
-# no_memcache path tests
-go test -tags no_memcache ./...
+git clone --recurse-submodules git@github.com:kworathur/DeathStarBench.git
 ```
 
-### Docker Compose
+4. Run the `install.sh` script
+```bash
+cd DeathStarBench/hotelReservation
+./scripts/install.sh
+```
 
-Pass the build tag via `GOFLAGS`:
+5. Run the `start_backing.sh` script
+```bash
+./scripts/start_backing.sh
+```
+
+If successful, the script should output the URL of mongod, consul, and jaeger UI
+
+6. Run the `start_services.sh` script
+```bash
+./scripts/start_services.sh
+```
+
+7. On the client node, run the testing script
 
 ```bash
-GOFLAGS="-tags=no_memcache" docker compose up -d --build
+python scripts/compare_schedutil_performance.py --ssh-user worathur --ssh-key ~/.ssh/id_rsa --server-host 10.10.1.1 --target hotels --remote-repo-root ~/DeathStarBench --threads 4 --conections 4 --rates 1000:10000:2000
 ```
 
-You can also omit the Memcached container from your compose override since it will not be contacted.
+8. The script will step through the QPS rates, generating poisson-distributed load with wrk2 and measuring power consumption for both `performance` and `schedutil` frequency governors.
 
-### Request call graph (`no_memcache` build)
 
-```mermaid
-flowchart LR
-    C[Client] --> F[Frontend /hotels]
-    F --> S[Search.Nearby]
-    S --> G[Geo.Nearby]
-    S --> R1[Rate.GetRates]
-    R1 --> MGR[(Mongo rate-db.inventory)]
-    F --> RS[Reservation.CheckAvailability]
-    RS --> MGS[(Mongo reservation-db)]
-    F --> P[Profile.GetProfiles]
-    P --> MGP[(Mongo profile-db.hotels)]
-```
-
----
-
-## Pre-requirements
-- Docker
-- Docker-compose
-- luarocks (apt-get install luarocks)
-- luasocket (luarocks install luasocket)
-
-## Running the hotel reservation application
+## Running the Hotel Reservation Applications
 
 ### As Processes
 
@@ -211,7 +133,6 @@ done
 ```
 
 ### In Docker Containers
-
 
 ### Before you start
 - Install Docker and Docker Compose.
