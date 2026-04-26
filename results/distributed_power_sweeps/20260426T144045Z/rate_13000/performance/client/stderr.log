@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "/users/worathur/DeathStarBench/hotelReservation/scripts/parse_wrk_metrics.py", line 111, in <module>
+    raise SystemExit(main())
+  File "/users/worathur/DeathStarBench/hotelReservation/scripts/parse_wrk_metrics.py", line 101, in main
+    metrics = parse_wrk_log(Path(args.input))
+  File "/users/worathur/DeathStarBench/hotelReservation/scripts/parse_wrk_metrics.py", line 68, in parse_wrk_log
+    max_from_distribution = extract_percentile_ms(text, 100.0)
+  File "/users/worathur/DeathStarBench/hotelReservation/scripts/parse_wrk_metrics.py", line 39, in extract_percentile_ms
+    short_values[float(match.group("pct"))] = duration_to_ms(match.group("value"))
+  File "/users/worathur/DeathStarBench/hotelReservation/scripts/parse_wrk_metrics.py", line 33, in duration_to_ms
+    return float(token)
+ValueError: could not convert string to float: '0.92m'
