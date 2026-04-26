@@ -122,7 +122,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--threads", type=int, default=cfg.THREADS)
     parser.add_argument("--connections", type=int, default=cfg.CONNECTIONS)
-    parser.add_argument("--duration", type=int, default=cfg.DURATION_SECONDS)
     parser.add_argument(
         "--rates",
         default=cfg.RATES_SPEC,
@@ -139,6 +138,37 @@ def parse_args() -> argparse.Namespace:
         choices=["auto", "rapl", "battery"],
     )
     return parser.parse_args()
+
+
+def _powerstat_min_count(source: str) -> int:
+    """Mirror run_power_sweep.sh powerstat_min_count."""
+    return 120 if source == "rapl" else 600
+
+
+def _detect_powerstat_source(source_arg: str) -> str:
+    """Mirror run_power_sweep.sh detect_powerstat_source for the local machine."""
+    if source_arg in ("rapl", "battery"):
+        return source_arg
+    # auto: prefer RAPL if available
+    return "rapl" if Path("/sys/class/powercap/intel-rapl").is_dir() else "battery"
+
+
+def compute_effective_duration(
+    powerstat_interval: float,
+    powerstat_source_arg: str,
+) -> int:
+    """Return the measurement window that run_power_sweep.sh will use.
+
+    Duration is derived entirely from the powerstat parameters: the minimum
+    sample count for the chosen source divided by the sampling interval.
+    There is no separate --duration knob; this is the single source of truth.
+    """
+    import math
+
+    source = _detect_powerstat_source(powerstat_source_arg)
+    count = _powerstat_min_count(source)
+    effective = count * powerstat_interval
+    return int(math.ceil(effective))
 
 
 def expand_rates(spec: str) -> list[int]:
@@ -161,6 +191,7 @@ def build_sweep_cmd(
     rate: int,
     output_dir: str,
     args: argparse.Namespace,
+    duration: int,
 ) -> list[str]:
     """Build the argument list for run_power_sweep.sh."""
     script = f"{expand_remote_path(repo_root)}/{cfg.REMOTE_SCRIPT}"
@@ -172,7 +203,7 @@ def build_sweep_cmd(
         "--host", host_url,
         "--threads", str(args.threads),
         "--connections", str(args.connections),
-        "--duration", str(args.duration),
+        "--duration", str(duration),
         "--rates", str(rate),
         "--powerstat-interval", str(args.powerstat_interval),
         "--powerstat-source", args.powerstat_source,
@@ -382,15 +413,15 @@ def plot_throughput_comparison(path: Path, rows: list[dict]) -> None:
 
 
 def plot_latency_comparison(path: Path, rows: list[dict]) -> None:
-    """Plot arrival rate vs latency percentiles, one line per governor per percentile.
+    """Plot arrival rate vs P50 and P99 latency in separate subplots.
 
-    Governors are distinguished by colour; percentiles by line style, matching
-    the style used in export_reference_qps_run.plot_combined_latency.
+    Each subplot shows one line per governor for that percentile.
+    Data is filtered to exclude points where P99 exceeds 20× the minimum P50.
     """
     import matplotlib.pyplot as plt
 
-    # Group rows by governor, keeping only rows with full latency data.
-    _LATENCY_COLS = ("p50_ms", "p90_ms", "p95_ms", "p99_ms")
+    # Group rows by governor, keeping only rows with P50 and P99 data.
+    _LATENCY_COLS = ("p50_ms", "p99_ms")
     by_governor: dict[str, list[dict]] = {}
     for row in rows:
         if _parse_float(row, "arrival_rate_rps") is None:
@@ -403,36 +434,59 @@ def plot_latency_comparison(path: Path, rows: list[dict]) -> None:
     if not by_governor:
         return
 
-    # Assign a colour per governor and a style per percentile.
-    colours = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    gov_colour = {gov: colours[i % len(colours)] for i, gov in enumerate(sorted(by_governor))}
-    percentile_styles = [
-        ("p50_ms", "P50", "-"),
-        ("p90_ms", "P90", "--"),
-        ("p95_ms", "P95", "-."),
-        ("p99_ms", "P99", ":"),
+    # Find the minimum P50 across all governors and rates.
+    all_p50 = [
+        float(r["p50_ms"])
+        for gov_rows in by_governor.values()
+        for r in gov_rows
     ]
+    if not all_p50:
+        return
+    min_p50 = min(all_p50)
+    cutoff_p99 = 20 * min_p50
 
-    fig, ax = plt.subplots(figsize=(9, 5.5))
-    for gov, gov_rows in sorted(by_governor.items()):
+    # Filter rows: keep only those where P99 <= cutoff.
+    filtered_by_governor: dict[str, list[dict]] = {}
+    for gov, gov_rows in by_governor.items():
+        filtered = [r for r in gov_rows if float(r["p99_ms"]) <= cutoff_p99]
+        if filtered:
+            filtered_by_governor[gov] = filtered
+
+    if not filtered_by_governor:
+        return
+
+    # Assign a colour per governor.
+    colours = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    gov_colour = {gov: colours[i % len(colours)] for i, gov in enumerate(sorted(filtered_by_governor))}
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 5.5))
+
+    # P50 subplot
+    for gov, gov_rows in sorted(filtered_by_governor.items()):
         gov_rows = sorted(gov_rows, key=lambda r: float(r["arrival_rate_rps"]))
         x = [float(r["arrival_rate_rps"]) for r in gov_rows]
-        for col, label, style in percentile_styles:
-            y = [float(r[col]) for r in gov_rows]
-            ax.plot(
-                x, y,
-                linestyle=style,
-                marker="o",
-                linewidth=2,
-                color=gov_colour[gov],
-                label=f"{gov} {label}",
-            )
+        y = [float(r["p50_ms"]) for r in gov_rows]
+        ax1.plot(x, y, marker="o", linewidth=2, color=gov_colour[gov], label=gov)
 
-    ax.set_xlabel("Arrival Rate (RPS)")
-    ax.set_ylabel("Latency (ms)")
-    ax.set_title("Arrival Rate vs Latency by Governor")
-    ax.grid(True, linestyle="--", alpha=0.5)
-    ax.legend(fontsize="small", ncol=len(by_governor))
+    ax1.set_xlabel("Arrival Rate (RPS)")
+    ax1.set_ylabel("P50 Latency (ms)")
+    ax1.set_title("Arrival Rate vs P50 Latency by Governor")
+    ax1.grid(True, linestyle="--", alpha=0.5)
+    ax1.legend()
+
+    # P99 subplot
+    for gov, gov_rows in sorted(filtered_by_governor.items()):
+        gov_rows = sorted(gov_rows, key=lambda r: float(r["arrival_rate_rps"]))
+        x = [float(r["arrival_rate_rps"]) for r in gov_rows]
+        y = [float(r["p99_ms"]) for r in gov_rows]
+        ax2.plot(x, y, marker="o", linewidth=2, color=gov_colour[gov], label=gov)
+
+    ax2.set_xlabel("Arrival Rate (RPS)")
+    ax2.set_ylabel("P99 Latency (ms)")
+    ax2.set_title(f"Arrival Rate vs P99 Latency by Governor (cutoff: {cutoff_p99:.1f}ms)")
+    ax2.grid(True, linestyle="--", alpha=0.5)
+    ax2.legend()
+
     fig.tight_layout()
     fig.savefig(path, dpi=200)
     plt.close(fig)
@@ -445,6 +499,20 @@ def main() -> int:
     remote = not is_localhost(server_host)
 
     rates = expand_rates(args.rates)
+
+    # Duration is derived entirely from the powerstat parameters so that the
+    # wrk2 load window always matches the power measurement window exactly.
+    # wrk2's -d flag includes calibration/warmup time (~8-10s), so the actual
+    # load generation is shorter than the specified duration. We add a +10s
+    # buffer to ensure wrk2's load generation covers the full powerstat window.
+    effective_duration = compute_effective_duration(
+        args.powerstat_interval, args.powerstat_source
+    )
+    client_duration = effective_duration + 10
+    print(f"Measurement duration: {effective_duration}s "
+          f"({_powerstat_min_count(_detect_powerstat_source(args.powerstat_source))} samples "
+          f"× {args.powerstat_interval}s)")
+    print(f"Client load duration: {client_duration}s (server + 10s buffer for wrk2 warmup)")
 
     run_id = timestamp()
     local_output_dir = Path(
@@ -472,7 +540,8 @@ def main() -> int:
         f"remote_output_base={remote_output_base}",
         f"threads={args.threads}",
         f"connections={args.connections}",
-        f"duration={args.duration}",
+        f"effective_duration={effective_duration}",
+        f"client_duration={client_duration}",
         f"rates={args.rates}",
         f"powerstat_interval={args.powerstat_interval}",
         f"powerstat_source={args.powerstat_source}",
@@ -509,6 +578,7 @@ def main() -> int:
                 rate=rate,
                 output_dir=server_remote_output,
                 args=args,
+                duration=effective_duration,
             )
             client_cmd = build_sweep_cmd(
                 repo_root=str(cfg.REPO_ROOT),
@@ -519,6 +589,7 @@ def main() -> int:
                 rate=rate,
                 output_dir=client_remote_output,
                 args=args,
+                duration=client_duration,
             )
 
             # Run server and client in parallel
