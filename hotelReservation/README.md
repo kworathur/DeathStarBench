@@ -11,73 +11,55 @@ Supported actions:
 * Recommend hotels based on user provided metrics
 * Place reservations
 
-## Request Call Graphs
 
-The benchmark workload uses four request types (from `wrk2/scripts/hotel-reservation/mixed-workload\_type_1.lua`):
+## Reproducing the Progress Report Results
 
-- `GET /hotels` with 60% probability
-- `GET /recommendations` with 39% probability
-- `POST /user` with 0.5% probability
-- `POST /reservation` with 0.5% probability
+1. SSH into the client node and clone the repo 
 
-### `GET /hotels`
-
-```mermaid
-flowchart LR
-    C[Client] --> F[Frontend /hotels]
-    F --> S[Search.Nearby]
-    S --> G[Geo.Nearby]
-    S --> R1[Rate.GetRates]
-    R1 --> MR[(Memcached Rate)]
-    R1 --> MGR[(Mongo rate-db.inventory)]
-    F --> RS[Reservation.CheckAvailability]
-    RS --> MRS[(Memcached Reserve)]
-    RS --> MGS[(Mongo reservation-db)]
-    F --> P[Profile.GetProfiles]
-    P --> MP[(Memcached Profile)]
-    P --> MGP[(Mongo profile-db.hotels)]
+```bash
+git clone --recurse-submodules git@github.com:kworathur/DeathStarBench.git
 ```
 
-### `GET /recommendations`
-
-```mermaid
-flowchart LR
-    C[Client] --> F[Frontend /recommendations]
-    F --> R[Recommendation.GetRecommendations]
-    R -. startup load .-> MGR[(Mongo recommendation-db)]
-    F --> P[Profile.GetProfiles]
-    P --> MP[(Memcached Profile)]
-    P --> MGP[(Mongo profile-db.hotels)]
+2. Run the `install.sh` script (required for `wrk2`)
+```bash
+cd DeathStarBench/hotelReservation
+./scripts/install.sh
 ```
 
-### `POST /user`
+3. SSH into the server node and clone the repo
 
-```mermaid
-flowchart LR
-    C[Client] --> F[Frontend /user]
-    F --> U[User.CheckUser]
-    U -. startup load .-> MGU[(Mongo user-db)]
+```bash
+git clone --recurse-submodules git@github.com:kworathur/DeathStarBench.git
 ```
 
-### `POST /reservation`
-
-```mermaid
-flowchart LR
-    C[Client] --> F[Frontend /reservation]
-    F --> U[User.CheckUser]
-    U -. startup load .-> MGU[(Mongo user-db)]
-    F --> R[Reservation.MakeReservation]
-    R --> MR[(Memcached Reserve)]
-    R --> MGR[(Mongo reservation-db)]
+4. Run the `install.sh` script
+```bash
+cd DeathStarBench/hotelReservation
+./scripts/install.sh
 ```
 
-## Pre-requirements
-- Docker
-- Docker-compose
-- luarocks (apt-get install luarocks)
-- luasocket (luarocks install luasocket)
+5. Run the `start_backing.sh` script
+```bash
+./scripts/start_backing.sh
+```
 
-## Running the hotel reservation application
+If successful, the script should output the URL of mongod, consul, and jaeger UI
+
+6. Run the `start_services.sh` script
+```bash
+./scripts/start_services.sh
+```
+
+7. On the client node, run the testing script
+
+```bash
+python scripts/compare_schedutil_performance.py --ssh-user worathur --ssh-key ~/.ssh/id_rsa --server-host 10.10.1.1 --target hotels --remote-repo-root ~/DeathStarBench --threads 4 --conections 4 --rates 1000:10000:2000
+```
+
+8. The script will step through the QPS rates, generating poisson-distributed load with wrk2 and measuring power consumption for both `performance` and `schedutil` frequency governors.
+
+
+## Running the Hotel Reservation Applications
 
 ### As Processes
 
@@ -125,8 +107,32 @@ curl "http://localhost:5000/hotels?inDate=2015-04-09&outDate=2015-04-10&lat=38.0
 
 Service logs are written to `/tmp/hotel-logs/`.
 
-### In Docker Containers
+#### Running without Memcached (`no_memcache`)
 
+`start_services.sh` runs whatever binaries are in `bin/`. To deploy without Memcached, rebuild the three affected services with the `no_memcache` tag before starting:
+
+```bash
+# Rebuild only the services that use Memcached
+for svc in profile rate reservation; do
+    go build -tags no_memcache -o "bin/$svc" "./cmd/$svc"
+done
+```
+
+Then start as normal — Memcached does not need to be running:
+
+```bash
+./scripts/start_services.sh
+```
+
+To go back to the default (Memcached-enabled) build, rebuild without the tag:
+
+```bash
+for svc in profile rate reservation; do
+    go build -o "bin/$svc" "./cmd/$svc"
+done
+```
+
+### In Docker Containers
 
 ### Before you start
 - Install Docker and Docker Compose.
@@ -174,22 +180,7 @@ The distributed entrypoint is now a Python orchestrator, aligned with the remote
 
 Use `--refresh-repo` to `git fetch` and `git pull --ff-only` on existing remote checkouts before starting a new sweep.
 
-### Generate Report Figures
-1. Run install script
-
-```bash
-./hotelReservation/scripts/install.sh
-```
-
-2. Checkout code on remote machines
-```bash
-python run_distributed_power_sweeps.py --server-hosts 10.10.3.2 --client-hosts 10.10.3.1 --targets reservations --governors schedutil --ssh-key ~/.ssh/id_rsa --private-key ~/.ssh/cloudlab_git --clone-repo-url git@github.com:kworathur/DeathStarBench.git --remote-repo-root ~/DeathStarBench --bootstrap-only
-```
-
-3. Run the load generation experiments
-```bash
-python run_distributed_power_sweeps.py --server-hosts 10.10.3.2 --client-hosts 10.10.3.1 --targets hotels --governors schedutil --ssh-key ~/.ssh/id_rsa --private-key ~/.ssh/cloudlab_git --clone-repo-url git@github.com:kworathur/DeathStarBench.git --remote-repo-root ~/DeathStarBench --rates 100:500:100
-```
+../wrk2/wrk -D exp -t 4 -c 128 -d 300 -L -s ./wrk2/scripts/hotel-reservation/single-endpoint.lua http://c220g1-030808.wisc.cloudlab.us:5000 -R 10000 > schedutil_10000_hotels.txt
 
 ### Questions and contact
 
