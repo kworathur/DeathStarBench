@@ -1,2 +1,0 @@
-Running mode=client target=hotels governor=client rate=11000rps
-Results CSV: /tmp/hotelReservation-power-sweeps/20260426T120854Z/11000/schedutil/client/results.csv

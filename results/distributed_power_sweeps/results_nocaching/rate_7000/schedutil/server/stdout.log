@@ -65,4 +65,4 @@ Setting cpu: 30
 Setting cpu: 31
 Running mode=server-power target=hotels governor=schedutil rate=7000rps
 powerstat_cmd: sudo powerstat -n -R 0.5 120
-Results CSV: /tmp/hotelReservation-power-sweeps/20260426T005041Z/7000/schedutil/server/results.csv
+Results CSV: /tmp/hotelReservation-power-sweeps/20260426T133648Z/7000/schedutil/server/results.csv
