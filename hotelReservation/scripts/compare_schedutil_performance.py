@@ -412,11 +412,11 @@ def plot_throughput_comparison(path: Path, rows: list[dict]) -> None:
     plt.close(fig)
 
 
-def plot_latency_comparison(path: Path, rows: list[dict]) -> None:
-    """Plot arrival rate vs P50 and P99 latency in separate subplots.
+def plot_latency_comparison(p50_path: Path, p99_path: Path, rows: list[dict]) -> None:
+    """Plot arrival rate vs P50 and P99 latency in separate files.
 
-    Each subplot shows one line per governor for that percentile.
-    Data is filtered to exclude points where P99 exceeds 20× the minimum P50.
+    Each plot shows one line per governor for that percentile.
+    Data is filtered to exclude points where P99 exceeds 10× the minimum P50.
     """
     import matplotlib.pyplot as plt
 
@@ -443,7 +443,7 @@ def plot_latency_comparison(path: Path, rows: list[dict]) -> None:
     if not all_p50:
         return
     min_p50 = min(all_p50)
-    cutoff_p99 = 20 * min_p50
+    cutoff_p99 = 10 * min_p50
 
     # Filter rows: keep only those where P99 <= cutoff.
     filtered_by_governor: dict[str, list[dict]] = {}
@@ -459,36 +459,38 @@ def plot_latency_comparison(path: Path, rows: list[dict]) -> None:
     colours = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     gov_colour = {gov: colours[i % len(colours)] for i, gov in enumerate(sorted(filtered_by_governor))}
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 5.5))
-
-    # P50 subplot
+    # P50 plot
+    fig, ax = plt.subplots(figsize=(9, 5.5))
     for gov, gov_rows in sorted(filtered_by_governor.items()):
         gov_rows = sorted(gov_rows, key=lambda r: float(r["arrival_rate_rps"]))
         x = [float(r["arrival_rate_rps"]) for r in gov_rows]
         y = [float(r["p50_ms"]) for r in gov_rows]
-        ax1.plot(x, y, marker="o", linewidth=2, color=gov_colour[gov], label=gov)
+        ax.plot(x, y, marker="o", linewidth=2, color=gov_colour[gov], label=gov)
 
-    ax1.set_xlabel("Arrival Rate (RPS)")
-    ax1.set_ylabel("P50 Latency (ms)")
-    ax1.set_title("Arrival Rate vs P50 Latency by Governor")
-    ax1.grid(True, linestyle="--", alpha=0.5)
-    ax1.legend()
+    ax.set_xlabel("Arrival Rate (RPS)")
+    ax.set_ylabel("P50 Latency (ms)")
+    ax.set_title(f"Arrival Rate vs P50 Latency by Governor (P99 cutoff: {cutoff_p99:.1f}ms)")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(p50_path, dpi=200)
+    plt.close(fig)
 
-    # P99 subplot
+    # P99 plot
+    fig, ax = plt.subplots(figsize=(9, 5.5))
     for gov, gov_rows in sorted(filtered_by_governor.items()):
         gov_rows = sorted(gov_rows, key=lambda r: float(r["arrival_rate_rps"]))
         x = [float(r["arrival_rate_rps"]) for r in gov_rows]
         y = [float(r["p99_ms"]) for r in gov_rows]
-        ax2.plot(x, y, marker="o", linewidth=2, color=gov_colour[gov], label=gov)
+        ax.plot(x, y, marker="o", linewidth=2, color=gov_colour[gov], label=gov)
 
-    ax2.set_xlabel("Arrival Rate (RPS)")
-    ax2.set_ylabel("P99 Latency (ms)")
-    ax2.set_title(f"Arrival Rate vs P99 Latency by Governor (cutoff: {cutoff_p99:.1f}ms)")
-    ax2.grid(True, linestyle="--", alpha=0.5)
-    ax2.legend()
-
+    ax.set_xlabel("Arrival Rate (RPS)")
+    ax.set_ylabel("P99 Latency (ms)")
+    ax.set_title(f"Arrival Rate vs P99 Latency by Governor (cutoff: {cutoff_p99:.1f}ms)")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend()
     fig.tight_layout()
-    fig.savefig(path, dpi=200)
+    fig.savefig(p99_path, dpi=200)
     plt.close(fig)
 
 
@@ -708,11 +710,13 @@ def main() -> int:
     else:
         print("No fully-merged rows available for plotting (missing power or latency data).", file=sys.stderr)
 
-    # Arrival rate vs latency comparison plot (one series per governor per percentile).
-    latency_plot_path = local_output_dir / "arrival_rate_vs_latency.png"
+    # Arrival rate vs latency comparison plots (separate files for P50 and P99).
+    p50_plot_path = local_output_dir / "arrival_rate_vs_p50.png"
+    p99_plot_path = local_output_dir / "arrival_rate_vs_p99.png"
     try:
-        plot_latency_comparison(latency_plot_path, merged)
-        print(f"Plot saved: {latency_plot_path}")
+        plot_latency_comparison(p50_plot_path, p99_plot_path, merged)
+        print(f"Plot saved: {p50_plot_path}")
+        print(f"Plot saved: {p99_plot_path}")
     except Exception as exc:  # noqa: BLE001
         print(f"Warning: latency plot failed: {exc}", file=sys.stderr)
 

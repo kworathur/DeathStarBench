@@ -53,7 +53,7 @@ If successful, the script should output the URL of mongod, consul, and jaeger UI
 7. On the client node, run the testing script
 
 ```bash
-python scripts/compare_schedutil_performance.py --ssh-user worathur --ssh-key ~/.ssh/id_rsa --server-host 10.10.1.1 --target hotels --remote-repo-root ~/DeathStarBench --threads 4 --conections 4 --rates 1000:10000:2000
+python scripts/compare_schedutil_performance.py --ssh-user worathur --ssh-key ~/.ssh/id_rsa --server-host 10.10.1.1 --target hotels --remote-repo-root ~/DeathStarBench --threads 4 --connections 128 --rates 1000:10000:2000
 ```
 
 8. The script will step through the QPS rates, generating poisson-distributed load with wrk2 and measuring power consumption for both `performance` and `schedutil` frequency governors.
