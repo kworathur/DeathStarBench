@@ -1,0 +1,2 @@
+Running mode=client target=hotels governor=client rate=9000rps
+Results CSV: /tmp/hotelReservation-power-sweeps/20260501T191231Z/9000/performance/client/results.csv
